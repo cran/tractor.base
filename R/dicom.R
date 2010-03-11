@@ -31,7 +31,7 @@
             else
             {
                 value <- unlist(strsplit(as.vector(valueRow$values), "\\", fixed=TRUE))
-                if (capabilities()["iconv"] == TRUE)
+                if (capabilities("iconv") == TRUE)
                     value <- iconv(value, "", "LATIN1", sub="byte")
                 value <- gsub("^\\s*(.+?)\\s*$", "\\1", value, perl=TRUE)
                 
@@ -126,41 +126,53 @@ newMriImageMetadataFromDicomMetadata <- function (dicom)
     if (is.na(columns))
         columns <- dataColumns
     
-    slices <- dicom$getTagValue(0x0019, 0x100a)
-    if (is.na(slices))
+    # Tags are "Siemens # images in mosaic", "# frames", "Philips # slices"
+    slices <- c(dicom$getTagValue(0x0019,0x100a), dicom$getTagValue(0x0028,0x0008), dicom$getTagValue(0x2001,0x1018))
+    if (all(is.na(slices)))
+        slices <- NULL
+    else
+        slices <- slices[!is.na(slices)][1]
+    
+    if (rows != dataRows || columns != dataColumns)
     {
-        if (rows == dataRows && columns == dataColumns)
-            slices <- NULL
-        else if (rows == dataColumns && columns == dataRows)
+        # Siemens mosaic format
+        if (identical(dicom$getTagValue(0x0008,0x0070), "SIEMENS"))
         {
-            flag(OL$Info, "Data matrix is transposed relative to acquisition matrix")
-            rows <- dataRows
-            columns <- dataColumns
-            slices <- NULL
-        }
-        else if (identical(dicom$getTagValue(0x0008,0x0070), "SIEMENS"))
-        {
-            # Siemens mosaic format
-            slices <- (dataRows/rows) * (dataColumns/columns)
-            if (slices != floor(slices))
+            slicesPerRow <- dataRows / rows
+            slicesPerColumn <- dataColumns / columns
+            if (is.null(slices))
+                slices <- slicesPerRow * slicesPerColumn
+            if (slicesPerRow != floor(slicesPerRow) || slicesPerColumn != floor(slicesPerColumn))
             {
-                flag(OL$Warning, "Image dimensions are not a multiple of the acquisition matrix size")
-                slices <- NULL
+                if (rows == dataColumns && columns == dataRows)
+                    flag(OL$Info, "Data matrix is transposed relative to acquisition matrix")
+                else
+                {
+                    flag(OL$Warning, "Image dimensions are not a multiple of the acquisition matrix size")
+                    slices <- NULL
+                }
+                
                 rows <- dataRows
                 columns <- dataColumns
             }
         }
         else
         {
-            # Image upsampled or downsampled after acquisition, e.g. by zero filling
-            slices <- NULL
+            if (rows == dataColumns && columns == dataRows)
+                flag(OL$Info, "Data matrix is transposed relative to acquisition matrix")
+            else
+                flag(OL$Info, "Image has been upsampled or downsampled after acquisition")
+
             rows <- dataRows
             columns <- dataColumns
         }
     }
     
-    if (is.null(slices))
+    if (is.null(slices) || slices == 1)
+    {
         nDims <- 2
+        slices <- NULL
+    }
     else
     {
         nDims <- 3
@@ -231,18 +243,23 @@ newMriImageFromDicomMetadata <- function (metadata, flipY = TRUE)
     }
     else if (nDims == 3)
     {
-        # Handle Siemens mosaic images, which encapsulate a whole 3D image in
-        # a single-frame DICOM file
-        mosaicDims <- c(fileMetadata$getTagValue(0x0028, 0x0010), fileMetadata$getTagValue(0x0028, 0x0011))
-        mosaicGrid <- mosaicDims / dims[1:2]
-        mosaicCellDims <- mosaicDims / mosaicGrid
-        gridColumns <- rep(1:mosaicGrid[2], times=mosaicDims[2], each=mosaicCellDims[1])
-        gridRows <- rep(1:mosaicGrid[1], each=mosaicCellDims[2]*mosaicDims[1])
-        
-        data <- array(NA, dim=dims)
-        sliceList <- tapply(pixels, list(gridColumns,gridRows), "[")
-        for (i in seq_len(dims[3]))
-            data[,,i] <- sliceList[[i]]
+        if (identical(fileMetadata$getTagValue(0x0008,0x0070), "SIEMENS"))
+        {
+            # Handle Siemens mosaic images, which encapsulate a whole 3D image in
+            # a single-frame DICOM file
+            mosaicDims <- c(fileMetadata$getTagValue(0x0028, 0x0010), fileMetadata$getTagValue(0x0028, 0x0011))
+            mosaicGrid <- mosaicDims / dims[1:2]
+            mosaicCellDims <- mosaicDims / mosaicGrid
+            gridColumns <- rep(1:mosaicGrid[2], times=mosaicDims[2], each=mosaicCellDims[1])
+            gridRows <- rep(1:mosaicGrid[1], each=mosaicCellDims[2]*mosaicDims[1])
+
+            data <- array(NA, dim=dims)
+            sliceList <- tapply(pixels, list(gridColumns,gridRows), "[")
+            for (i in seq_len(dims[3]))
+                data[,,i] <- sliceList[[i]]
+        }
+        else
+            data <- array(pixels, dim=dims)
         
         if (flipY)
             data <- data[,(dims[2]:1),]
@@ -318,6 +335,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
 
     output(OL$Info, "Reading image information from ", nFiles, " files")
     seriesNumbers <- numeric(0)
+    seriesDescriptions <- character(0)
     acquisitionNumbers <- numeric(0)
     imageNumbers <- numeric(0)
     sliceLocations <- numeric(0)
@@ -341,6 +359,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
         }
 
         seriesNumbers <- c(seriesNumbers, metadata$getTagValue(0x0020,0x0011))
+        seriesDescriptions <- c(seriesDescriptions, metadata$getTagValue(0x0008,0x103e))
         acquisitionNumbers <- c(acquisitionNumbers, metadata$getTagValue(0x0020,0x0012))
         imageNumbers <- c(imageNumbers, metadata$getTagValue(0x0020,0x0013))
         sliceLocations <- c(sliceLocations, metadata$getTagValue(0x0020,0x1041))
@@ -364,26 +383,34 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
     if (nDicomFiles == 0)
         output(OL$Error, "No readable DICOM files were found")
     
-    firstSliceDirection <- which(abs(sliceOrientation[1:3]) == 1) * sum(sliceOrientation[1:3])
-    secondSliceDirection <- which(abs(sliceOrientation[4:6]) == 1) * sum(sliceOrientation[4:6])
-    if (length(firstSliceDirection) != 1 || length(secondSliceDirection) != 1)
+    # The sum() function recovers the sign in the sapply() call here
+    sliceOrientation <- lapply(list(1:3,4:6), function (i) sliceOrientation[i])
+    sliceDirections <- sapply(sliceOrientation, function (x) which(abs(x) == 1) * sum(x))
+    
+    # Oblique slices case
+    if (!is.numeric(sliceDirections) || length(sliceDirections) != 2)
     {
-        roundedSliceOrientation <- round(sliceOrientation)
-        firstSliceDirection <- which(abs(roundedSliceOrientation[1:3]) == 1) * sum(roundedSliceOrientation[1:3])
-        secondSliceDirection <- which(abs(roundedSliceOrientation[4:6]) == 1) * sum(roundedSliceOrientation[4:6])
+        sliceDirections <- sapply(sliceOrientation, function (x) {
+            currentSliceDirection <- which.max(abs(x))
+            currentSliceDirection * sign(x[currentSliceDirection])
+        })
         
-        if (length(firstSliceDirection) == 1 || length(secondSliceDirection) == 1)
-            output(OL$Warning, "Slices appear to be oblique: mean offset is ", signif(mean(abs(sliceOrientation-roundedSliceOrientation)),3))
+        if (sliceDirections[1] == sliceDirections[2])
+            output(OL$Error, "DICOM slice orientation information is complex or nonsensical")
         else
-            output(OL$Error, "Slice orientation information is missing or complex")
+        {
+            angles <- sapply(list(1,2), function (i) acos(abs(sliceOrientation[[i]][abs(sliceDirections[i])]) / vectorLength(sliceOrientation[[i]])))
+            angles <- round(angles / pi * 180, 2)
+            output(OL$Warning, "Slices appear to be oblique: rotations from axes are ", implode(angles," and "), " deg")
+        }
     }
     
-    sliceDirections <- abs(c(firstSliceDirection, secondSliceDirection))
-    throughSliceDirection <- setdiff(1:3, abs(c(firstSliceDirection,secondSliceDirection)))
+    absoluteSliceDirections <- abs(sliceDirections)
+    throughSliceDirection <- setdiff(1:3, absoluteSliceDirections)
     output(OL$Info, "Slice select direction is ", LETTERS[24:26][throughSliceDirection])
     
     # If not TRUE, the data need flipping or transposing
-    isSimpleCase <- (firstSliceDirection > 0 && secondSliceDirection > 0 && equivalent(setdiff(1:3,throughSliceDirection),sliceDirections))
+    isSimpleCase <- (all(sliceDirections > 0) && equivalent(setdiff(1:3,throughSliceDirection),absoluteSliceDirections))
     if (!isSimpleCase)
         output(OL$Info, "DICOM files do not use a \"simple\" slice arrangement")
 
@@ -409,11 +436,11 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
             output(OL$Error, "Number of files (", nDicomFiles, ") is not a multiple of the number of slices detected (", nSlices, ")")
         
         imageDims <- c(NA, NA, NA, nVolumes)
-        imageDims[sliceDirections] <- images[[1]]$getDimensions()
+        imageDims[absoluteSliceDirections] <- images[[1]]$getDimensions()
         imageDims[throughSliceDirection] <- nSlices
         
         voxelDims <- c(NA, NA, NA, 1)
-        voxelDims[sliceDirections] <- images[[1]]$getVoxelDimensions()
+        voxelDims[absoluteSliceDirections] <- images[[1]]$getVoxelDimensions()
         voxelDims[throughSliceDirection] <- sliceDim
     }
 
@@ -459,14 +486,14 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
                     {
                         loc <- alist(x=, y=, z=, t=)
                         loc[[throughSliceDirection]] <- slice
-                        if (firstSliceDirection < 0)
-                            loc[[sliceDirections[1]]] <- imageDims[sliceDirections[1]]:1
-                        if (secondSliceDirection < 0)
-                            loc[[sliceDirections[2]]] <- imageDims[sliceDirections[2]]:1
+                        if (sliceDirections[1] < 0)
+                            loc[[absoluteSliceDirections[1]]] <- imageDims[absoluteSliceDirections[1]]:1
+                        if (sliceDirections[2] < 0)
+                            loc[[absoluteSliceDirections[2]]] <- imageDims[absoluteSliceDirections[2]]:1
                         loc$t <- volume
 
                         sliceData <- images[[slicePos]]$getData()
-                        if (sliceDirections[1] > sliceDirections[2])
+                        if (absoluteSliceDirections[1] > absoluteSliceDirections[2])
                             sliceData <- t(sliceData)
 
                         data <- do.call("[<-", c(list(data),loc,list(sliceData)))
@@ -510,7 +537,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
     imageMetadata <- newMriImageMetadataFromTemplate(images[[1]]$getMetadata(), imageDims=imageDims[dimsToKeep], voxelDims=voxelDims[dimsToKeep], origin=origin[dimsToKeep])
     image <- newMriImageWithData(data, imageMetadata)
     
-    returnValue <- list(image=image)
+    returnValue <- list(image=image, seriesDescriptions=unique(seriesDescriptions))
     if (readDiffusionParams)
         returnValue <- c(returnValue, list(bValues=volumeBValues, bVectors=volumeBVectors))
     
@@ -573,6 +600,9 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
         types <- character(0)
         values <- character(0)
         
+        sequenceLevel <- 0
+        duplicateTags <- FALSE
+        
         seek(connection, where=tagOffset)
         repeat
         {
@@ -586,7 +616,17 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
             }
             currentElement <- readBin(connection, "integer", n=1, size=2, signed=FALSE, endian=endian)
             
-            if (explicitTypes)
+            # Sequence related tags are always untyped
+            if (currentGroup == 0xfffe)
+            {
+                # End of sequence delimiter
+                if (sequenceLevel > 0 && currentElement == 0xe0dd)
+                    sequenceLevel <- sequenceLevel - 1
+                
+                lengthSize <- 4
+                type <- "UN"
+            }
+            else if (explicitTypes)
             {
                 type <- rawToCharQuiet(readBin(connection, "raw", n=2))
                 if (any(.Dicom$longTypes == type))
@@ -607,20 +647,44 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
             
             length <- readBin(connection, "integer", n=1, size=lengthSize, signed=FALSE, endian=endian)
             
-            if (any(c("OX","OW","OB","UN") == type))
+            output(OL$Debug, "Group ", sprintf("0x%04x",currentGroup), ", element ", sprintf("0x%04x",currentElement), ", type ", type, ", length ", length, ifelse(sequenceLevel>0," (in sequence)",""))
+            
+            if (any(c("OX","OW","OB","UN") == type) || (type == "SQ" && sequenceLevel > 0))
             {
                 if ((currentGroup == 0x7fe0) && (currentElement == 0x0010))
                 {
                     dataOffset <- seek(connection, where=NA)
                     dataLength <- length
                 }
-                seek(connection, where=length, origin="current")
+                
+                if (type == "SQ" && length == -1)
+                    sequenceLevel <- sequenceLevel + 1
+                else if (length > 0)
+                    seek(connection, where=length, origin="current")
+                
+                next
+            }
+            else if (any(groups==currentGroup & elements==currentElement))
+            {
+                duplicateTags <- TRUE
+                if (length > 0)
+                    seek(connection, where=length, origin="current")
+                
                 next
             }
             
             groups <- c(groups, currentGroup)
             elements <- c(elements, currentElement)
             types <- c(types, type)
+            
+            # Handle sequences of indeterminate length (to date only seen in Philips data)
+            if (type == "SQ" && length == -1)
+            {
+                if (sequenceLevel == 0)
+                    values <- c(values, "(Sequence)")
+                sequenceLevel <- sequenceLevel + 1
+                next
+            }
             
             if (any(.Dicom$nonCharTypes$codes == type))
             {
@@ -632,7 +696,7 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
                     value <- readBin(connection, "integer", n=nValues, size=size, signed=.Dicom$nonCharTypes$isSigned[loc], endian=endian)
                 else
                     value <- readBin(connection, "double", n=nValues, size=size, endian=endian)
-                    
+                
                 if (nValues > 1)
                     values <- c(values, implode(value,sep="\\"))
                 else
@@ -648,6 +712,9 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
             invisible (NULL)
         else
         {
+            if (duplicateTags)
+                flag(OL$Warning, "Duplicated DICOM tags detected - only the first value will be kept")
+            
             tags <- data.frame(groups=groups, elements=elements, types=types, values=values, stringsAsFactors=FALSE)
             invisible (.DicomMetadata(fileName, tags, tagOffset, dataOffset, dataLength, explicitTypes, endian))
         }
