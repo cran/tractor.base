@@ -31,12 +31,12 @@
 \alias{newMriImageMetadataFromNifti}
 \alias{producesError}
 \alias{promote}
-\alias{rawToCharQuiet}
 \alias{readDiffusionParametersFromMetadata}
 \alias{requireArguments}
 \alias{resolveVector}
 \alias{restrict}
 \alias{splitAndConvertString}
+\alias{stripNul}
 \alias{superimposePng}
 \alias{vectorCrossProduct}
 \alias{vectorLength}
