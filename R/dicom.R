@@ -25,7 +25,7 @@
         
         getTagValue = function (group, element)
         {
-            valueRow <- subset(.tags, (groups == group & elements == element))
+            valueRow <- subset(.tags, (.tags$groups == group & .tags$elements == element))
             if (dim(valueRow)[1] == 0)
                 return (NA)
             else
@@ -97,7 +97,7 @@ getDescriptionForDicomTag <- function (groupRequired, elementRequired, dictionar
     if (is.null(dictionary))
         data("dictionary", envir=environment(NULL))
     
-    dictionaryRow <- subset(dictionary, (group==groupRequired & element==elementRequired))
+    dictionaryRow <- subset(dictionary, (dictionary$group==groupRequired & dictionary$element==elementRequired))
     if (nrow(dictionaryRow) == 0)
         description <- sprintf("Unknown (0x%04x, 0x%04x)", groupRequired, elementRequired)
     else
@@ -109,14 +109,14 @@ getDescriptionForDicomTag <- function (groupRequired, elementRequired, dictionar
 newMriImageMetadataFromDicom <- function (fileName)
 {
     fileMetadata <- newDicomMetadataFromFile(fileName)
-    if (fileMetadata$getTagValue(0x0008, 0x0060) != "MR")
-        output(OL$Error, "DICOM file does not contain MR image data")
-    
     invisible (newMriImageMetadataFromDicomMetadata(fileMetadata))
 }
 
 newMriImageMetadataFromDicomMetadata <- function (dicom)
 {
+    if (dicom$getTagValue(0x0008, 0x0060) != "MR")
+        flag(OL$Warning, "DICOM file does not contain MR image data")
+    
     acquisitionMatrix <- dicom$getTagValue(0x0018, 0x1310)
     rows <- max(acquisitionMatrix[1], acquisitionMatrix[3])
     columns <- max(acquisitionMatrix[2], acquisitionMatrix[4])
@@ -172,7 +172,7 @@ newMriImageMetadataFromDicomMetadata <- function (dicom)
         }
     }
     
-    if (is.null(slices) || slices == 1)
+    if (is.null(slices) || slices <= 1)
     {
         nDims <- 2
         slices <- NULL
@@ -223,8 +223,6 @@ maskPixels <- function (pixels, metadata)
 newMriImageFromDicomMetadata <- function (metadata, flipY = TRUE)
 {
     fileMetadata <- metadata
-    if (fileMetadata$getTagValue(0x0008, 0x0060) != "MR")
-        output(OL$Error, "DICOM file does not contain MR image data")
     imageMetadata <- newMriImageMetadataFromDicomMetadata(fileMetadata)
     
     datatype <- imageMetadata$getDataType()
@@ -404,7 +402,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
             output(OL$Error, "DICOM slice orientation information is complex or nonsensical")
         else
         {
-            angles <- sapply(list(1,2), function (i) acos(abs(sliceOrientation[[i]][abs(sliceDirections[i])]) / vectorLength(sliceOrientation[[i]])))
+            angles <- sapply(list(1,2), function (i) acos(abs(sliceOrientation[[i]][abs(sliceDirections[i])]) / sqrt(sum(sliceOrientation[[i]]^2))))
             angles <- round(angles / pi * 180, 2)
             output(OL$Warning, "Slices appear to be oblique: rotations from axes are ", implode(angles," and "), " deg")
         }

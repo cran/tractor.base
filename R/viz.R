@@ -1,3 +1,11 @@
+interpolatePalette <- function (colours, n, ...)
+{
+    rampFunction <- colorRamp(colours)
+    colourMatrix <- round(rampFunction(0:(n-1)/(n-1)))
+    rgbStrings <- apply(colourMatrix, 1, function (x) sprintf("#%02X%02X%02X",x[1],x[2],x[3]))
+    return (rgbStrings)
+}
+
 getColourScale <- function (n)
 {
     if (is.list(n))
@@ -8,11 +16,13 @@ getColourScale <- function (n)
     {
         colours <- list(gray(0:99/99),
                         heat.colors(100),
-                        rainbow(100, start=0.7, end=0.1))
+                        rainbow(100, start=0.7, end=0.1),
+                        interpolatePalette(c("#2166AC","#67A9CF","#D1E5F0","#F7F7F7","#FDDBC7","#EF8A62","#B2182B"), 100))  # ColorBrewer "RdBu" diverging palette
     
         background <- list("black",
                            "red",
-                           "blue")
+                           "blue",
+                           "#F7F7F7")
     
         return (list(colours=colours[[n]], background=background[[n]]))
     }
@@ -139,7 +149,7 @@ createContactSheetGraphic <- function (image, axis, device = c("internal","png")
     }
 }
 
-createCombinedGraphics <- function (images, modes, colourScales, axes = 1:3, sliceLoc = NULL, device = c("internal","png"), alphaImages = NULL, prefix = "image", zoomFactor = 1, filter = "Mitchell", windowLimits = NULL)
+createCombinedGraphics <- function (images, modes, colourScales, axes = 1:3, sliceLoc = NULL, device = c("internal","png"), alphaImages = NULL, prefix = "image", zoomFactor = 1, filter = "Mitchell", windowLimits = NULL, clearance = NULL, nColumns = NULL)
 {
     if (!is.list(images) || !is.list(colourScales))
         output(OL$Error, "Images and colour scales must be given as lists")
@@ -150,9 +160,11 @@ createCombinedGraphics <- function (images, modes, colourScales, axes = 1:3, sli
     if (!is.numeric(axes) || any(axes < 1 | axes > 3))
         output(OL$Error, "Projection axes must be specified as a combination of 1 (x), 2 (y) or 3 (z)")
     
-    modes <- match.arg(modes, c("slice","projection"), several.ok=TRUE)
+    modes <- match.arg(modes, c("slice","projection","contact"), several.ok=TRUE)
     if (any(modes == "slice") && is.null(sliceLoc))
         output(OL$Error, "Slice location must be specified")
+    if (any(modes == "contact") && !all(modes == "contact"))
+        output(OL$Error, "Contact slice mode must be used for all graphics or none")
     
     device <- match.arg(device)
     
@@ -187,11 +199,17 @@ createCombinedGraphics <- function (images, modes, colourScales, axes = 1:3, sli
                     if (!is.null(alphaImages[[i]]))
                         createSliceGraphic(alphaImages[[i]], currentSliceLoc[1], currentSliceLoc[2], currentSliceLoc[3], device="png", colourScale=1, file=imageFiles[2*i], zoomFactor=zoomFactor, filter=filter)
                 }
-                else
+                else if (modes[i] == "projection")
                 {
                     createProjectionGraphic(images[[i]], axis, device="png", colourScale=colourScales[[i]], file=imageFiles[2*i-1], zoomFactor=zoomFactor, filter=filter, windowLimits=windowLimits[[i]])
                     if (!is.null(alphaImages[[i]]))
                         createProjectionGraphic(alphaImages[[i]], axis, device="png", colourScale=1, file=imageFiles[2*i], zoomFactor=zoomFactor, filter=filter)
+                }
+                else
+                {
+                    createContactSheetGraphic(images[[i]], axis, device="png", colourScale=colourScales[[i]], file=imageFiles[2*i-1], zoomFactor=zoomFactor, filter=filter, windowLimits=windowLimits[[i]], clearance=clearance, nColumns=nColumns)
+                    if (!is.null(alphaImages[[i]]))
+                        createContactSheetGraphic(alphaImages[[i]], axis, device="png", colourScale=1, file=imageFiles[2*i], zoomFactor=zoomFactor, filter=filter, clearance=clearance, nColumns=nColumns)
                 }
                 
                 if (i == 1)
