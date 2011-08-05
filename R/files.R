@@ -8,7 +8,7 @@ getParametersForFileType <- function (fileType = NA, format = NA, singleFile = N
     if (length(typeIndex) != 1)
     {
         if (errorIfInvalid)
-            output(OL$Error, "Specified file type information is incomplete or invalid")
+            report(OL$Error, "Specified file type information is incomplete or invalid")
         else
             return (NULL)
     }
@@ -35,14 +35,14 @@ identifyImageFileNames <- function (fileName, fileType = NULL, errorIfMissing = 
     if (length(headersExist) < 1 || length(imagesExist) < 1)
     {
         if (errorIfMissing)
-            output(OL$Error, "Complete image file does not exist: ", fileName)
+            report(OL$Error, "Complete image file does not exist: ", fileName)
         else
             return (NULL)
     }
     if (length(headersExist) > 1 || length(imagesExist) > 1)
     {
         if (errorIfMissing)
-            output(OL$Error, "Multiple compatible image files exist: ", fileName)
+            report(OL$Error, "Multiple compatible image files exist: ", fileName)
         else
             return (NULL)
     }
@@ -62,13 +62,15 @@ identifyImageFileNames <- function (fileName, fileType = NULL, errorIfMissing = 
     else
         format <- ifelse(hasNiftiMagicString(headerFile), "Nifti", "Analyze")
     
-    fileNames <- list(fileStem=fileStem, headerFile=headerFile, imageFile=imageFile, format=format)
+    fileNames <- list(fileStem=fileStem, headerFile=headerFile, imageFile=imageFile, format=format, headerSuffix=headersExist, imageSuffix=imagesExist)
     return (fileNames)
 }
 
 imageFileExists <- function (fileName, fileType = NULL)
 {
-    return (!is.null(identifyImageFileNames(fileName, fileType, errorIfMissing=FALSE)))
+    return (sapply(fileName, function (file) {
+        !is.null(identifyImageFileNames(file, fileType, errorIfMissing=FALSE))
+    }))
 }
 
 removeImageFilesWithName <- function (fileName)
@@ -79,39 +81,172 @@ removeImageFilesWithName <- function (fileName)
     unlink(files)
 }
 
-newMriImageMetadataFromFile <- function (fileName, fileType = NULL)
+symlinkImageFiles <- function (from, to, overwrite = FALSE, relative = TRUE)
+{
+    if (length(from) != length(to))
+        report(OL$Error, "The number of source and target file names must match")
+    
+    suffixes <- union(.FileTypes$headerSuffixes, .FileTypes$imageSuffixes)
+    
+    for (i in seq_along(from))
+    {
+        info <- identifyImageFileNames(from[i])
+        currentSource <- unique(c(info$headerFile, info$imageFile))
+        currentTarget <- unique(ensureFileSuffix(expandFileName(to[i]), c(info$headerSuffix,info$imageSuffix), strip=suffixes))
+        
+        if (overwrite && any(file.exists(currentTarget)))
+            unlink(currentTarget)
+        if (relative)
+        {
+            for (j in seq_along(currentSource))
+                currentSource[j] <- relativePath(currentSource[j], currentTarget[j])
+        }
+        
+        file.symlink(currentSource, currentTarget)
+    }
+}
+
+copyImageFiles <- function (from, to, overwrite = FALSE, deleteOriginals = FALSE)
+{
+    if (length(from) != length(to))
+        report(OL$Error, "The number of source and target file names must match")
+    
+    suffixes <- union(.FileTypes$headerSuffixes, .FileTypes$imageSuffixes)
+    
+    for (i in seq_along(from))
+    {
+        info <- identifyImageFileNames(from[i])
+        currentSource <- c(info$headerFile, info$imageFile)
+        currentTarget <- ensureFileSuffix(expandFileName(to[i]), c(info$headerSuffix,info$imageSuffix), strip=suffixes)
+        
+        # Don't try to copy an image onto itself
+        if (all(currentSource == currentTarget))
+            next
+        
+        success <- file.copy(unique(currentSource), unique(currentTarget), overwrite=overwrite)
+        
+        if (all(success) && deleteOriginals)
+            removeImageFilesWithName(from[i])
+    }
+}
+
+readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE)
 {
     fileNames <- identifyImageFileNames(fileName, fileType)
     
-    if (fileNames$format == "Analyze")
-        metadata <- newMriImageMetadataFromAnalyze(fileNames)
-    else if (fileNames$format == "Nifti")
-        metadata <- newMriImageMetadataFromNifti(fileNames)
+    readFun <- switch(fileNames$format, Analyze=readAnalyze, Nifti=readNifti, Mgh=readMgh)
+    info <- readFun(fileNames)
     
-    invisible (metadata)
+    datatype <- info$imageMetadata$datatype
+    endian <- info$storageMetadata$endian
+    dims <- info$imageMetadata$imageDims
+    voxelDims <- info$imageMetadata$voxelDims
+    nVoxels <- prod(dims)
+    nDims <- length(dims)
+    
+    if (!metadataOnly)
+    {
+        connection <- gzfile(fileNames$imageFile, "rb")
+        if (fileNames$imageFile == fileNames$headerFile)
+            seek(connection, where=info$storageMetadata$dataOffset)
+
+        voxels <- readBin(connection, what=datatype$type, n=nVoxels, size=datatype$size, signed=datatype$isSigned, endian=endian)
+        data <- array(voxels, dim=dims)
+        close(connection)
+
+        slope <- info$storageMetadata$dataScalingSlope
+        intercept <- info$storageMetadata$dataScalingIntercept
+        if (slope != 0 && !equivalent(c(slope,intercept), 1:0))
+            data <- data * slope + intercept
+    }
+    
+    rotationMatrix <- info$storageMetadata$xformMatrix[1:3,1:3]
+    absRotationMatrix <- abs(rotationMatrix)
+    tolerance <- 1e-3 * max(abs(voxelDims))
+    
+    # The rotation matrix should have exactly one nonzero element per row and column
+    if (!equivalent(rowSums(absRotationMatrix > tolerance), c(1,1,1)) || !equivalent(colSums(absRotationMatrix > tolerance), c(1,1,1)))
+        report(OL$Error, "NIfTI xform matrix is rotated")
+    else
+    {
+        dimPermutation <- apply(absRotationMatrix > tolerance, 1, which)
+        if (nDims > 3)
+            dimPermutation <- c(dimPermutation, 4:nDims)
+        else if (nDims < 3)
+            dimPermutation <- dimPermutation[1:nDims]
+        if (!identical(dimPermutation, seq_len(nDims)))
+        {
+            if (!metadataOnly)
+                data <- aperm(data, dimPermutation)
+            dims <- dims[dimPermutation]
+            voxelDims <- voxelDims[dimPermutation]
+        }
+        
+        # Fix signs of voxel dimensions to correspond to LAS
+        voxelDims <- abs(voxelDims) * c(-1, rep(1,nDims-1))
+        
+        # Figure out which dimensions need to be flipped
+        ordering <- round(colSums(rotationMatrix) / c(abs(voxelDims[1:min(3,nDims)]),rep(1,max(0,3-nDims))))
+        ordering <- ordering * c(-1, 1, 1)
+        
+        if (nDims == 2)
+        {
+            origin <- 1 - ordering[1:2] * round(info$storageMetadata$xformMatrix[1:2,4]/voxelDims[1:2],2)
+            origin <- ifelse(ordering[1:2] == c(1,1), origin, dims-origin+1)
+        }
+        else
+        {
+            origin <- c(1 - ordering[1:3] * round(info$storageMetadata$xformMatrix[1:3,4]/voxelDims[1:3],2), rep(0,nDims-3))
+            origin[1:3] <- ifelse(ordering[1:3] == c(1,1,1), origin[1:3], dims[1:3]-origin[1:3]+1)
+        }
+        
+        if (!metadataOnly)
+        {
+            orderX <- (if (ordering[1] == 1) seq_len(dims[1]) else rev(seq_len(dims[1])))
+            orderY <- (if (ordering[2] == 1) seq_len(dims[2]) else rev(seq_len(dims[2])))
+            if (nDims > 2)
+                orderZ <- (if (ordering[3] == 1) seq_len(dims[3]) else rev(seq_len(dims[3])))
+            dimsToKeep <- setdiff(1:nDims, 1:3)
+
+            if (nDims == 2)
+                data <- data[orderX, orderY]
+            else if (nDims == 3)
+                data <- data[orderX, orderY, orderZ]
+            else
+                data <- array(apply(data, dimsToKeep, "[", orderX, orderY, orderZ), dim=dim(data))
+        }
+    }
+    
+    imageMetadata <- MriImageMetadata$new(imagedims=dims, voxdims=voxelDims, voxunit=info$imageMetadata$voxelUnit, source=info$imageMetadata$source, datatype=datatype, origin=origin, storedXform=info$storageMetadata$xformMatrix, tags=info$imageMetadata$tags)
+    
+    if (metadataOnly)
+        invisible (imageMetadata)
+    else
+    {
+        image <- MriImage$new(data, imageMetadata)
+        invisible (image)
+    }
+}
+
+newMriImageMetadataFromFile <- function (fileName, fileType = NULL)
+{
+    invisible (readImageFile(fileName, fileType, metadataOnly=TRUE))
 }
 
 newMriImageFromFile <- function (fileName, fileType = NULL)
 {
-    fileNames <- identifyImageFileNames(fileName, fileType)
-    
-    if (fileNames$format == "Analyze")
-        image <- newMriImageFromAnalyze(fileNames)
-    else if (fileNames$format == "Nifti")
-        image <- newMriImageFromNifti(fileNames)
-    
-    invisible (image)
+    invisible (readImageFile(fileName, fileType, metadataOnly=FALSE))
 }
 
 writeMriImageToFile <- function (image, fileName = NULL, fileType = NA, datatype = NULL, overwrite = TRUE)
 {
-    if (!isMriImage(image))
-        output(OL$Error, "The specified image is not an MriImage object")
+    if (!is(image, "MriImage"))
+        report(OL$Error, "The specified image is not an MriImage object")
     
     if (!is.null(fileName))
         fileName <- expandFileName(fileName)
     else if (image$isInternal())
-        output(OL$Error, "This image has no associated file name; it must be specified")
+        report(OL$Error, "This image has no associated file name; it must be specified")
     else
         fileName <- image$getSource()
     
@@ -127,7 +262,7 @@ writeMriImageToFile <- function (image, fileName = NULL, fileType = NA, datatype
     if (overwrite)
         unlink(files[exist])
     else if (sum(exist) > 0)
-        output(OL$Error, "File exists and cannot be overwritten")
+        report(OL$Error, "File exists and cannot be overwritten")
     
     fileStem <- ensureFileSuffix(fileName, NULL, strip=suffixes)
     headerFile <- ensureFileSuffix(fileStem, params$headerSuffix)
@@ -138,6 +273,8 @@ writeMriImageToFile <- function (image, fileName = NULL, fileType = NA, datatype
         writeMriImageToAnalyze(image, fileNames, gzipped=params$gzipped, datatype=datatype)
     else if (params$format == "Nifti")
         writeMriImageToNifti(image, fileNames, gzipped=params$gzipped, datatype=datatype)
+    else if (params$format == "Mgh")
+        writeMriImageToMgh(image, fileNames, gzipped=params$gzipped, datatype=datatype)
     
     invisible (fileNames)
 }

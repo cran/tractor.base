@@ -1,12 +1,3 @@
-"%~%" <- function (X, Y)
-{
-    if (!is.character(X) || !is.character(Y) || length(Y) != 1)
-        output(OL$Error, "Parameters for matching on a regular expression are not valid")
-    
-    matchLocs <- regexpr(Y, X, perl=TRUE)
-    return (!(matchLocs == -1))
-}
-
 implode <- function (strings, sep = "", finalSep = NULL)
 {
     strings <- as.character(strings)
@@ -27,6 +18,38 @@ implode <- function (strings, sep = "", finalSep = NULL)
     }
 }
 
+printLabelledValues <- function (labels, values, outputLevel = OL$Info, leftJustify = FALSE)
+{
+    if (length(labels) != length(values))
+        report(OL$Error, "Labels and values should be of the same length")
+    
+    labelLengths <- nchar(labels)
+    maxLabelLength <- max(labelLengths)
+    nValues <- length(values)
+    
+    for (i in seq_len(nValues))
+    {
+        if (leftJustify)
+            report(outputLevel, "  ", labels[i], implode(rep(" ",maxLabelLength-labelLengths[i]),sep=""), " : ", values[i], prefixFormat="")
+        else
+            report(outputLevel, implode(rep(" ",maxLabelLength-labelLengths[i]),sep=""), labels[i], " : ", values[i], prefixFormat="")
+    }
+    
+    invisible(NULL)
+}
+
+relativePath <- function (path, referencePath)
+{
+    mainPieces <- strsplit(expandFileName(path), .Platform$file.sep, fixed=TRUE)[[1]]
+    refPieces <- strsplit(expandFileName(referencePath), .Platform$file.sep, fixed=TRUE)[[1]]
+    
+    shorterLength <- min(length(mainPieces), length(refPieces))
+    firstDifferentPiece <- min(which(mainPieces[1:shorterLength] != refPieces[1:shorterLength])[1], shorterLength, na.rm=TRUE)
+    newPieces <- c(rep("..", length(refPieces)-firstDifferentPiece), mainPieces[firstDifferentPiece:length(mainPieces)])
+    
+    return (implode(newPieces, sep=.Platform$file.sep))
+}
+
 expandFileName <- function (fileName)
 {
     fileName <- path.expand(fileName)
@@ -40,7 +63,7 @@ expandFileName <- function (fileName)
         fileName <- sub("/[^/]*[^./][^/]*/\\.\\.(?=/)", "", fileName, perl=TRUE)
     fileName <- gsub("/*\\.?$", "", fileName, perl=TRUE)
     
-    return(fileName)
+    return (fileName)
 }
 
 ensureFileSuffix <- function (fileName, suffix, strip = NULL)
@@ -76,7 +99,7 @@ locateExecutable <- function (fileName, errorIfMissing = TRUE)
     if (sum(filesExist) == 0)
     {
         if (errorIfMissing)
-            output(OL$Error, "Required executable \"", fileName, "\" is not available on the system path")
+            report(OL$Error, "Required executable \"", fileName, "\" is not available on the system path")
         else
             return (NULL)
     }
@@ -93,9 +116,9 @@ execute <- function (executable, paramString = NULL, errorOnFail = TRUE, silent 
     if (!is.null(execLoc))
     {
         execString <- paste(execLoc, paramString, sep=" ")
-        if (silent && getOption("tractorOutputLevel") > OL$Debug)
+        if (silent && getOutputLevel() > OL$Debug)
             execString <- paste(execString, ">/dev/null 2>&1", sep=" ")
-        output(OL$Debug, execString)
+        report(OL$Debug, execString)
         system(execString, ...)
     }
 }

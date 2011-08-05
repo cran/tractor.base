@@ -1,62 +1,42 @@
-.DicomMetadata <- function (.source, .tags, .tagOffset, .dataOffset, .dataLength, .explicitTypes, .endian)
-{
-    self <- list(
-        getAvailableTags = function ()
-        {
-            nTags <- self$nTags()
-            tags <- list()
-            if (nTags > 0)
-            {
-                for (i in 1:nTags)
-                    tags <- c(tags, list(list(group=.tags[i,1],element=.tags[i,2])))
-            }
-            return (tags)
-        },
-
-        getDataLength = function () { return (.dataLength) },
-        
-        getDataOffset = function () { return (.dataOffset) },
-        
-        getEndianness = function () { return (.endian) },
-        
-        getSource = function () { return (.source) },
-        
-        getTagOffset = function () { return (.tagOffset) },
-        
-        getTagValue = function (group, element)
-        {
-            valueRow <- subset(.tags, (.tags$groups == group & .tags$elements == element))
-            if (dim(valueRow)[1] == 0)
-                return (NA)
-            else
-            {
-                value <- unlist(strsplit(as.vector(valueRow$values), "\\", fixed=TRUE))
-                if (capabilities("iconv") == TRUE)
-                    value <- iconv(value, "", "LATIN1", sub="byte")
-                value <- gsub("^\\s*(.+?)\\s*$", "\\1", value, perl=TRUE)
-                
-                if (as.vector(valueRow$types) %in% .Dicom$convertibleTypes)
-                    return (as.numeric(value))
-                else
-                    return (value)
-            }
-        },
-
-        nTags = function () { return (length(.tags[,1])) }
-    )
+DicomMetadata <- setRefClass("DicomMetadata", contains="SerialisableObject", fields=list(source="character",tags="data.frame",tagOffset="integer",dataOffset="integer",dataLength="integer",explicitTypes="logical",endian="character"), methods=list(
+    getDataLength = function () { return (dataLength) },
     
-    class(self) <- c("metadata.dicom", "list.object", "list")
-    invisible (self)
-}
+    getDataOffset = function () { return (dataOffset) },
+    
+    getEndianness = function () { return (endian) },
+    
+    getSource = function () { return (source) },
+    
+    getTags = function () { return (tags) },
+    
+    getTagOffset = function () { return (tagOffset) },
+    
+    getTagValue = function (group, element)
+    {
+        valueRow <- subset(tags, (tags$groups == group & tags$elements == element))
+        if (dim(valueRow)[1] == 0)
+            return (NA)
+        else
+        {
+            value <- unlist(strsplit(as.vector(valueRow$values), "\\", fixed=TRUE, useBytes=TRUE))
+            if (capabilities("iconv") == TRUE)
+                value <- iconv(value, "", "LATIN1", sub="byte")
+            value <- gsub("^\\s*(.+?)\\s*$", "\\1", value, perl=TRUE)
+            
+            if (as.vector(valueRow$types) %in% .Dicom$convertibleTypes)
+                return (as.numeric(value))
+            else
+                return (value)
+        }
+    },
 
-isDicomMetadata <- function (object)
-{
-    return ("metadata.dicom" %in% class(object))
-}
+    nTags = function () { return (nrow(tags)) }
+))
 
-print.metadata.dicom <- function (x, descriptions = FALSE, ...)
+print.DicomMetadata <- function (x, descriptions = FALSE, ...)
 {
-    tags <- x$getAvailableTags()
+    tags <- x$getTags()
+    nTags <- nrow(tags)
     if (descriptions && !exists("dictionary"))
     {
         # First set to NULL to keep package checker happy
@@ -64,28 +44,28 @@ print.metadata.dicom <- function (x, descriptions = FALSE, ...)
         data("dictionary", package="tractor.base", envir=environment(NULL))
     }
     
-    if (length(tags) > 0)
+    if (nTags > 0)
     {
         if (descriptions)
         {
             cat("DESCRIPTION", rep(" ",19), "VALUE\n", sep="")
-            for (tag in tags)
+            for (i in seq_len(nTags))
             {
-                description <- getDescriptionForDicomTag(tag$group, tag$element, dictionary)
+                description <- getDescriptionForDicomTag(tags$groups[i], tags$elements[i], dictionary)
                 cat(" ", substr(description, 1, 27), sep="")
                 nSpaces <- max(3, 30-nchar(description))
                 cat(rep(" ",nSpaces), sep="")
-                cat(implode(x$getTagValue(tag$group,tag$element), sep=", "))
+                cat(implode(x$getTagValue(tags$groups[i],tags$elements[i]), sep=", "))
                 cat("\n")
             }
         }
         else
         {
             cat("GROUP    ELEMENT  VALUE\n")
-            for (tag in tags)
+            for (i in seq_len(nTags))
             {
-                cat(sprintf(" 0x%04x   0x%04x   ", tag$group, tag$element))
-                cat(implode(x$getTagValue(tag$group,tag$element), sep=", "))
+                cat(sprintf(" 0x%04x   0x%04x   ", tags$groups[i], tags$elements[i]))
+                cat(implode(x$getTagValue(tags$groups[i],tags$elements[i]), sep=", "))
                 cat("\n")
             }
         }
@@ -109,22 +89,22 @@ getDescriptionForDicomTag <- function (groupRequired, elementRequired, dictionar
 sortDicomDirectory <- function (directory, deleteOriginals = FALSE)
 {
     if (!file.exists(directory) || !file.info(directory)$isdir)
-        output(OL$Error, "Specified path (", directory, ") does not exist or does not point to a directory")
+        report(OL$Error, "Specified path (", directory, ") does not exist or does not point to a directory")
     
     files <- expandFileName(list.files(directory, full.names=TRUE, recursive=TRUE))
     files <- files[!file.info(files)$isdir]
     nFiles <- length(files)
 
     count <- 0
-    seriesNumbers <- numeric(nFiles)
+    seriesNumbers <- integer(nFiles)
     
-    output(OL$Info, "Reading series numbers from ", nFiles, " files")
+    report(OL$Info, "Reading series numbers from ", nFiles, " files")
     for (i in 1:nFiles)
     {
-        metadata <- try(newDicomMetadataFromFile(files[i]), silent=TRUE)
+        metadata <- try(newDicomMetadataFromFile(files[i], stopTag=c(0x0020,0x0011)), silent=TRUE)
         if (is.null(metadata) || ("try-error" %in% class(metadata)))
         {
-            output(OL$Info, "Skipping ", files[i])
+            report(OL$Info, "Skipping ", files[i])
             seriesNumbers[i] <- NA
         }
         else
@@ -132,27 +112,29 @@ sortDicomDirectory <- function (directory, deleteOriginals = FALSE)
             seriesNumbers[i] <- metadata$getTagValue(0x0020, 0x0011)
             count <- count + 1
             if (count %% 100 == 0)
-                output(OL$Verbose, "Done ", count)
+                report(OL$Verbose, "Done ", count)
         }
     }
 
     nDicomFiles <- count
     if (nDicomFiles == 0)
-        output(OL$Error, "No readable DICOM files were found")
+        report(OL$Error, "No readable DICOM files were found")
 
     uniqueSeries <- sort(unique(seriesNumbers))
-    output(OL$Info, "Found series ", implode(uniqueSeries,", "), "; creating subdirectories")
+    report(OL$Info, "Found series ", implode(uniqueSeries,", "), "; creating subdirectories")
+    
+    numberWidth <- nchar(as.character(max(uniqueSeries)))
     
     for (series in uniqueSeries)
     {
         matchingFiles <- which(seriesNumbers==series)
         if (length(matchingFiles) > 0)
         {
-            metadata <- newDicomMetadataFromFile(files[matchingFiles[1]])
+            metadata <- newDicomMetadataFromFile(files[matchingFiles[1]], stopTag=c(0x0008,0x103e))
             description <- metadata$getTagValue(0x0008, 0x103e)
-            output(OL$Info, "Series ", series, " includes ", length(matchingFiles), " files; description is \"", description, "\"")
+            report(OL$Info, "Series ", series, " includes ", length(matchingFiles), " files; description is \"", description, "\"")
             
-            subdirectory <- paste(series, gsub("\\W","",description,perl=TRUE), sep="_")
+            subdirectory <- paste(sprintf(paste("%0",numberWidth,"d",sep=""),series), gsub("\\W","",description,perl=TRUE), sep="_")
             dir.create(file.path(directory, subdirectory))
             
             seriesFiles <- basename(files[matchingFiles])
@@ -162,7 +144,7 @@ sortDicomDirectory <- function (directory, deleteOriginals = FALSE)
             success <- file.copy(files[matchingFiles], file.path(directory,subdirectory,seriesFiles))
 
             if (!all(success))
-                output(OL$Warning, "Not all files copied successfully for series ", series, " - nothing will be deleted")
+                report(OL$Warning, "Not all files copied successfully for series ", series, " - nothing will be deleted")
             else if (deleteOriginals)
                 unlink(files[matchingFiles])
         }
@@ -248,20 +230,20 @@ newMriImageMetadataFromDicomMetadata <- function (dicom)
     
     bitsAllocated <- dicom$getTagValue(0x0028, 0x0100)
     if ((bitsAllocated %% 8) != 0)
-        output(OL$Error, "Number of bits allocated per pixel doesn't correspond to an integral number of bytes")
+        report(OL$Error, "Number of bits allocated per pixel doesn't correspond to an integral number of bytes")
     isSigned <- isTRUE(dicom$getTagValue(0x0028, 0x0103) == 1)
     datatype <- list(type="integer", size=bitsAllocated/8, isSigned=isSigned)
     
-    metadata <- .MriImageMetadata(c(columns,rows,slices), voxdims, "mm", dicom$getSource(), datatype, rep(1,nDims), endian) 
+    metadata <- MriImageMetadata$new(imagedims=c(columns,rows,slices), voxdims=voxdims, voxunit="mm", source=dicom$getSource(), datatype=datatype, origin=rep(1,nDims)) 
     invisible (metadata)
 }
 
 maskPixels <- function (pixels, metadata)
 {
     if (!is.numeric(pixels) || !is.vector(pixels))
-        output(OL$Error, "Pixels must be specified as a numeric vector")
-    if (!isDicomMetadata(metadata))
-        output(OL$Error, "Specified metadata is not a valid DicomMetadata object")
+        report(OL$Error, "Pixels must be specified as a numeric vector")
+    if (!is(metadata, "DicomMetadata"))
+        report(OL$Error, "Specified metadata is not a valid DicomMetadata object")
     
     bitsAllocated <- metadata$getTagValue(0x0028, 0x0100)
     bitsStored <- metadata$getTagValue(0x0028, 0x0101)
@@ -270,7 +252,7 @@ maskPixels <- function (pixels, metadata)
     if (bitsAllocated == bitsStored)
         return (pixels)
     else if (!is.integer(pixels))
-        output(OL$Error, "Pixels must be specified as an integer vector")
+        report(OL$Error, "Pixels must be specified as an integer vector")
     
     mask <- rep(0, bitsAllocated)
     validIndices <- (1:bitsStored) + highBit - bitsStored + 1
@@ -330,7 +312,7 @@ newMriImageFromDicomMetadata <- function (metadata, flipY = TRUE)
             data <- data[,(dims[2]:1),]
     }
     
-    image <- .MriImage(drop(data), imageMetadata)
+    image <- MriImage$new(drop(data), imageMetadata)
     invisible (image)
 }
 
@@ -342,8 +324,8 @@ newMriImageFromDicom <- function (fileName)
 
 readDiffusionParametersFromMetadata <- function (metadata)
 {
-    if (!isDicomMetadata(metadata))
-        output(OL$Error, "The specified metadata is not a valid DicomMetadata object")
+    if (!is(metadata, "DicomMetadata"))
+        report(OL$Error, "The specified metadata is not a valid DicomMetadata object")
     
     bval <- metadata$getTagValue(0x0018, 0x9087)
     bvec <- metadata$getTagValue(0x0018, 0x9089)
@@ -389,9 +371,9 @@ readDiffusionParametersFromMetadata <- function (metadata)
 newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE)
 {
     if (!file.exists(dicomDir) || !file.info(dicomDir)$isdir)
-        output(OL$Error, "The specified path (", dicomDir, ") does not point to a directory")
+        report(OL$Error, "The specified path (", dicomDir, ") does not point to a directory")
     
-    output(OL$Info, "Looking for DICOM files in directory ", dicomDir)
+    report(OL$Info, "Looking for DICOM files in directory ", dicomDir)
     files <- expandFileName(list.files(dicomDir, full.names=TRUE, recursive=TRUE))
     files <- files[!file.info(files)$isdir]
     nFiles <- length(files)
@@ -399,7 +381,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
     dictionary <- NULL
     data("dictionary", package="tractor.base", envir=environment(NULL))
 
-    output(OL$Info, "Reading image information from ", nFiles, " files")
+    report(OL$Info, "Reading image information from ", nFiles, " files")
     seriesNumbers <- numeric(0)
     seriesDescriptions <- character(0)
     acquisitionNumbers <- numeric(0)
@@ -415,7 +397,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
         metadata <- newDicomMetadataFromFile(file, dictionary=dictionary)
         if (is.null(metadata))
         {
-            output(OL$Info, "Skipping ", file)
+            report(OL$Info, "Skipping ", file)
             next
         }
         else if (is.null(sliceDim))
@@ -435,19 +417,22 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
         {
             diffusion <- readDiffusionParametersFromMetadata(metadata)
             if (count == 0 && diffusion$defType != "none")
-                output(OL$Info, "Attempting to read diffusion parameters using ", diffusion$defType, " DICOM convention")
+                report(OL$Info, "Attempting to read diffusion parameters using ", diffusion$defType, " DICOM convention")
             bValues <- c(bValues, diffusion$bval)
             bVectors <- cbind(bVectors, diffusion$bvec)
         }
 
         count <- count + 1
         if (count %% 100 == 0)
-            output(OL$Verbose, "Done ", count)
+            report(OL$Verbose, "Done ", count)
     }
 
     nDicomFiles <- count
     if (nDicomFiles == 0)
-        output(OL$Error, "No readable DICOM files were found")
+        report(OL$Error, "No readable DICOM files were found")
+    
+    if (length(unique(seriesDescriptions)) > 1)
+        report(OL$Warning, "DICOM directory contains more than one unique series description - merging them may not make sense")
     
     # The sum() function recovers the sign in the sapply() call here
     sliceOrientation <- lapply(list(1:3,4:6), function (i) sliceOrientation[i])
@@ -462,23 +447,23 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
         })
         
         if (sliceDirections[1] == sliceDirections[2])
-            output(OL$Error, "DICOM slice orientation information is complex or nonsensical")
+            report(OL$Error, "DICOM slice orientation information is complex or nonsensical")
         else
         {
             angles <- sapply(list(1,2), function (i) acos(abs(sliceOrientation[[i]][abs(sliceDirections[i])]) / sqrt(sum(sliceOrientation[[i]]^2))))
             angles <- round(angles / pi * 180, 2)
-            output(OL$Warning, "Slices appear to be oblique: rotations from axes are ", implode(angles," and "), " deg")
+            report(OL$Warning, "Slices appear to be oblique: rotations from axes are ", implode(angles," and "), " deg")
         }
     }
     
     absoluteSliceDirections <- abs(sliceDirections)
     throughSliceDirection <- setdiff(1:3, absoluteSliceDirections)
-    output(OL$Info, "Slice select direction is ", LETTERS[24:26][throughSliceDirection])
+    report(OL$Info, "Slice select direction is ", LETTERS[24:26][throughSliceDirection])
     
     # If not TRUE, the data need flipping or transposing
     isSimpleCase <- (all(sliceDirections > 0) && equivalent(setdiff(1:3,throughSliceDirection),absoluteSliceDirections))
     if (!isSimpleCase)
-        output(OL$Info, "DICOM files do not use a \"simple\" slice arrangement")
+        report(OL$Info, "DICOM files do not use a \"simple\" slice arrangement")
 
     uniqueSeries <- sort(unique(seriesNumbers))
     uniqueAcquisitions <- sort(unique(acquisitionNumbers))
@@ -499,7 +484,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
         nSlices <- length(uniqueSlices)
         nVolumes <- nDicomFiles / nSlices
         if (floor(nVolumes) != nVolumes)
-            output(OL$Error, "Number of files (", nDicomFiles, ") is not a multiple of the number of slices detected (", nSlices, ")")
+            report(OL$Error, "Number of files (", nDicomFiles, ") is not a multiple of the number of slices detected (", nSlices, ")")
         
         imageDims <- c(NA, NA, NA, nVolumes)
         imageDims[absoluteSliceDirections] <- images[[1]]$getDimensions()
@@ -510,7 +495,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
         voxelDims[throughSliceDirection] <- sliceDim
     }
 
-    output(OL$Info, "Data set contains ", nVolumes, " volumes; ", nSlices, " slices per volume")
+    report(OL$Info, "Data set contains ", nVolumes, " volumes; ", nSlices, " slices per volume")
     data <- array(NA, dim=imageDims)
 
     if (readDiffusionParams)
@@ -585,7 +570,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
 
     if (!volumePerDicomFile && nSlices>1 && length(firstLocs)==2 && diff(firstLocs)<0)
     {
-        output(OL$Info, "Slice location decreases between consecutive images - inverting slice order")
+        report(OL$Info, "Slice location decreases between consecutive images - inverting slice order")
         indices <- alist(x=, y=, z=, t=)
         indices[[throughSliceDirection]] <- nSlices:1
         data <- do.call("[", c(list(data),indices,list(drop=FALSE)))
@@ -610,12 +595,12 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
     invisible (returnValue)
 }
 
-newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary = NULL)
+newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary = NULL, stopTag = NULL)
 {
     fileName <- expandFileName(fileName)
     
     if (!file.exists(fileName))
-        output(OL$Error, "DICOM file ", fileName, " not found")
+        report(OL$Error, "DICOM file ", fileName, " not found")
     
     # DICOM is sufficiently complicated that this can really only be
     # interpreted to mean "probably" or "probably not"
@@ -713,7 +698,7 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
             
             length <- readBin(connection, "integer", n=1, size=lengthSize, signed=FALSE, endian=endian)
             
-            output(OL$Debug, "Group ", sprintf("0x%04x",currentGroup), ", element ", sprintf("0x%04x",currentElement), ", type ", type, ", length ", length, ifelse(sequenceLevel>0," (in sequence)",""))
+            report(OL$Debug, "Group ", sprintf("0x%04x",currentGroup), ", element ", sprintf("0x%04x",currentElement), ", type ", type, ", length ", length, ifelse(sequenceLevel>0," (in sequence)",""))
             
             if (any(c("OX","OW","OB","UN") == type) || (type == "SQ" && sequenceLevel > 0))
             {
@@ -770,6 +755,13 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
             }
             else
                 values <- c(values, rawToChar(stripNul(readBin(connection, "raw", n=length))))
+            
+            if (!is.null(stopTag) && currentGroup == stopTag[1] && currentElement == stopTag[2])
+            {
+                dataOffset <- NA
+                dataLength <- NA
+                break
+            }
         }
         
         close(connection)
@@ -782,7 +774,7 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
                 flag(OL$Warning, "Duplicated DICOM tags detected - only the first value will be kept")
             
             tags <- data.frame(groups=groups, elements=elements, types=types, values=values, stringsAsFactors=FALSE)
-            invisible (.DicomMetadata(fileName, tags, tagOffset, dataOffset, dataLength, explicitTypes, endian))
+            invisible (DicomMetadata$new(source=fileName, tags=tags, tagOffset=tagOffset, dataOffset=dataOffset, dataLength=dataLength, explicitTypes=explicitTypes, endian=endian))
         }
     }
     else
