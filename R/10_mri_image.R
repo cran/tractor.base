@@ -66,8 +66,18 @@ MriImageMetadata <- setRefClass("MriImageMetadata", contains="SerialisableObject
             datatypeString <- paste(datatypeString, " ", datatype$type, ", ", datatype$size*8, " bits/voxel", sep="")
         }
         
+        spatialUnit <- voxunit[voxunit %~% "m$"]
+        temporalUnit <- voxunit[voxunit %~% "s$"]
+        voxelDimString <- paste(implode(round(abs(voxdims[1:min(3,length(voxdims))]),5), sep=" x "), ifelse(length(spatialUnit)==1,paste(" ",spatialUnit,sep=""),""), sep="")
+        if (length(voxdims) > 3)
+            voxelDimString <- paste(voxelDimString, " x ", round(abs(voxdims[4]),5), ifelse(length(spatialUnit)==1 && length(temporalUnit)==1,paste(" ", temporalUnit,sep=""),""), sep="")
+        if (length(voxdims) > 4)
+            voxelDimString <- paste(voxelDimString, " x ", implode(round(abs(voxdims[5:length(voxdims)]),5), sep=" x "), sep="")
+        if (identical(voxunit,"unknown"))
+            voxelDimString <- paste(voxelDimString, "(units unknown)", sep=" ")
+        
         labels <- c("Image source", "Image dimensions", "Coordinate origin", "Voxel dimensions", "Data type", "Additional tags")
-        values <- c(source, paste(implode(imagedims, sep=" x "),"voxels",sep=" "), paste("(",implode(round(origin,2), sep=","),")",sep=""), paste(implode(round(abs(voxdims),5), sep=" x "),ifelse(voxunit=="unknown","(units unknown)",voxunit),sep=" "), datatypeString, length(tags$keys))
+        values <- c(source, paste(implode(imagedims, sep=" x "),"voxels",sep=" "), paste("(",implode(round(origin,2), sep=","),")",sep=""), voxelDimString, datatypeString, length(tags$keys))
         return (list(labels=labels, values=values))
     }
 ))
@@ -137,6 +147,84 @@ setAs("array", "MriImage", function (from) {
     return (image)
 })
 
+setAs("MriImage", "nifti", function (from) {
+    if (is.null(getOption("niftiAuditTrail")))
+        options(niftiAuditTrail=FALSE)
+    suppressPackageStartupMessages(require(oro.nifti))
+    
+    datatype <- from$getDataType()
+    datatypeMatches <- (.Nifti$datatypes$rTypes == datatype$type) & (.Nifti$datatypes$sizes == datatype$size) & (.Nifti$datatypes$isSigned == datatype$isSigned)
+    if (length(which(datatypeMatches)) != 1)
+        report(OL$Error, "No supported NIfTI datatype is appropriate for this file")
+    typeIndex <- which(datatypeMatches)
+    
+    data <- as(from$getData(), "array")
+    storage.mode(data) <- .Nifti$datatypes$rTypes[typeIndex]
+    
+    # We default to 10 (mm and s)
+    unitName <- from$getVoxelUnit()
+    unitCode <- as.numeric(.Nifti$units[names(.Nifti$units) %in% unitName])
+    if (length(unitCode) == 0)
+        unitCode <- 10
+    else
+        unitCode <- sum(unitCode)
+    
+    nDims <- from$getDimensionality()
+    fullDims <- c(nDims, abs(from$getDimensions()), rep(1,7-nDims))
+    fullVoxelDims <- c(-1, abs(from$getVoxelDimensions()), rep(0,7-nDims))
+    
+    origin <- (from$getOrigin() - 1) * abs(from$getVoxelDimensions())
+    if (length(origin) > 3)
+        origin <- origin[1:3]
+    else if (length(origin) < 3)
+        origin <- c(origin, rep(0,3-length(origin)))
+    origin <- ifelse(origin < 0, rep(0,3), origin)
+    origin[2:3] <- -origin[2:3]
+    sformRows <- c(-fullVoxelDims[2], 0, 0, origin[1],
+                    0, fullVoxelDims[3], 0, origin[2],
+                    0, 0, fullVoxelDims[4], origin[3])
+    
+    xformCode <- ifelse(from$getDimensionality() == 2, 0, 2)
+    
+    return (new("nifti", .Data=data, dim_=fullDims, datatype=.Nifti$datatypes$codes[typeIndex], bitpix=8*.Nifti$datatypes$sizes[typeIndex], pixdim=fullVoxelDims, xyzt_units=unitCode, qform_code=xformCode, sform_code=xformCode, quatern_b=0, quatern_c=1, quatern_d=0, qoffset_x=origin[1], qoffset_y=origin[2], qoffset_z=origin[3], srow_x=sformRows[1:4], srow_y=sformRows[5:8], srow_z=sformRows[9:12], cal_min=min(data), cal_max=max(data)))
+})
+
+setAs("nifti", "MriImage", function (from) {
+    if (is.null(getOption("niftiAuditTrail")))
+        options(niftiAuditTrail=FALSE)
+    suppressPackageStartupMessages(require(oro.nifti))
+    
+    nDims <- from@dim_[1]
+    voxelDims <- from@pixdim[seq_len(nDims)+1]
+    voxelDims3D <- c(voxelDims, rep(0,max(0,3-nDims))) * c(-1,1,1)
+    
+    spatialUnitCode <- packBits(intToBits(from@xyzt_units) & intToBits(7), "integer")
+    temporalUnitCode <- packBits(intToBits(from@xyzt_units) & intToBits(24), "integer")
+    voxelUnit <- names(.Nifti$units)[.Nifti$units %in% c(spatialUnitCode,temporalUnitCode)]
+    if (length(voxelUnit) == 0)
+        voxelUnit <- NULL
+    
+    if (from@qform_code > 0)
+    {
+        if (!equivalent(c(from@quatern_b,from@quatern_c,from@quatern_d), c(0,1,0)))
+            report(OL$Error, "Only images using the LAS orientation convention can be converted at present")
+        origin <- c(from@qoffset_x, from@qoffset_y, from@qoffset_z)
+    }
+    else if (from@sform_code > 0)
+    {
+        if (!equivalent(c(from@srow_x[1:3],from@srow_y[1:3],from@srow_z[1:3]), c(-voxelDims3D[1],0,0,0,voxelDims3D[2],0,0,0,voxelDims3D[3])))
+            report(OL$Error, "Only images using the LAS orientation convention can be converted at present")
+        origin <- c(from@srow_x[4], from@srow_y[4], from@srow_z[4])
+    }
+    else
+        origin <- rep(0, 3)
+    
+    metadata <- MriImageMetadata$new(imagedims=from@dim_[seq_len(nDims)+1], voxdims=voxelDims, voxunit=voxelUnit, datatype=getDataTypeByNiftiCode(from@datatype), origin=c(1-origin/voxelDims3D,rep(0,max(0,3-nDims))))
+    image <- newMriImageWithData(from@.Data, metadata)
+    
+    return (image)
+})
+
 "[.MriImage" <- function (x, ..., drop = TRUE)
 {
     return (x$getData()[...,drop=drop])
@@ -185,14 +273,14 @@ Summary.MriImage <- function (x, ..., na.rm = FALSE)
 
 setMethod("[", "MriImage", function (x, i, j, ..., drop = TRUE) {
     if (missing(j))
-        return (x$getData()[i])
+        return (x$getData()[i,...,drop=drop])
     else
         return (x$getData()[i,j,...,drop=drop])
 })
 
 setMethod("[<-", "MriImage", function (x, i, j, ..., value) {
     if (missing(j))
-        x$data[i] <- value
+        x$data[i,...] <- value
     else
         x$data[i,j,...] <- value
     x$setSource("internal")
