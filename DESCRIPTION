@@ -1,13 +1,13 @@
 Package: tractor.base
-Version: 2.2.0
-Date: 2012-08-16
+Version: 2.3.0
+Date: 2013-02-04
 Title: A package for reading, manipulating and visualising magnetic
         resonance images
-Author: Jon Clayden <jon.clayden+tractor@gmail.com>
+Author: Jon Clayden
 Maintainer: Jon Clayden <jon.clayden+tractor@gmail.com>
 Depends: R (>= 2.12.1), graphics, grDevices, methods, stats, utils
 Imports: reportr
-Suggests: oro.nifti
+Enhances: oro.nifti
 Description: The tractor.base package consists of functions for working
         with magnetic resonance images. It can read and write image
         files stored in Analyze, NIfTI, MGH and DICOM formats (DICOM
@@ -17,6 +17,6 @@ Encoding: UTF-8
 LazyLoad: yes
 License: GPL-2
 URL: http://www.tractor-mri.org.uk
-Packaged: 2012-08-17 09:56:57 UTC; jon
+Packaged: 2013-02-04 14:57:24 UTC; jon
 Repository: CRAN
-Date/Publication: 2012-08-17 11:10:36
+Date/Publication: 2013-02-05 18:45:05

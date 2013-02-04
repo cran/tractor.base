@@ -91,11 +91,11 @@ sortDicomDirectory <- function (directory, deleteOriginals = FALSE, sortOn = "se
     if (!file.exists(directory) || !file.info(directory)$isdir)
         report(OL$Error, "Specified path (", directory, ") does not exist or does not point to a directory")
     
-    sortOn <- match.arg(sortOn, c("series","subject"), several.ok=TRUE)
+    sortOn <- match.arg(sortOn, c("series","subject","date"), several.ok=TRUE)
     currentSort <- sortOn[1]
     remainingSorts <- sortOn[-1]
-    identifierTag <- switch(currentSort, series=c(0x0020,0x0011), subject=c(0x0010,0x0010))
-    descriptionTag <- switch(currentSort, series=c(0x0008,0x103e), subject=c(0x0010,0x0010))
+    identifierTag <- switch(currentSort, series=c(0x0020,0x0011), subject=c(0x0010,0x0010), date=c(0x0008,0x0020))
+    descriptionTag <- switch(currentSort, series=c(0x0008,0x103e), subject=c(0x0010,0x0010), date=c(0x0008,0x0020))
     
     directory <- expandFileName(directory)
     files <- expandFileName(list.files(directory, full.names=TRUE, recursive=TRUE))
@@ -128,7 +128,7 @@ sortDicomDirectory <- function (directory, deleteOriginals = FALSE, sortOn = "se
         report(OL$Error, "No readable DICOM files were found")
 
     uniqueIdentifiers <- na.omit(sort(unique(identifiers)))
-    report(OL$Info, "Found ", switch(currentSort,series="series",subject="subjects"), " ", implode(uniqueIdentifiers,", "), "; creating subdirectories")
+    report(OL$Info, "Found ", switch(currentSort,series="series",subject="subjects",date="dates"), " ", implode(uniqueIdentifiers,", "), "; creating subdirectories")
     
     identifierWidth <- max(nchar(uniqueIdentifiers))
     
@@ -150,6 +150,11 @@ sortDicomDirectory <- function (directory, deleteOriginals = FALSE, sortOn = "se
                 report(OL$Info, "Subject ", id, " includes ", length(matchingFiles), " files")
                 subdirectory <- gsub("\\W", "", description, perl=TRUE)
             }
+            else if (currentSort == "date")
+            {
+                report(OL$Info, "Date ", id, " includes ", length(matchingFiles), " files")
+                subdirectory <- as.character(description)
+            }
             
             if (!file.exists(file.path(directory, subdirectory)))
                 dir.create(file.path(directory, subdirectory))
@@ -167,7 +172,7 @@ sortDicomDirectory <- function (directory, deleteOriginals = FALSE, sortOn = "se
             if (!all(success))
                 report(OL$Warning, "Not all files copied successfully for ", currentSort, " ", id, " - nothing will be deleted")
             else if (deleteOriginals)
-                unlink(files[matchingFiles])
+                unlink(from[!inPlace])
             
             if (length(remainingSorts) > 0)
                 sortDicomDirectory(file.path(directory,subdirectory), TRUE, sortOn=remainingSorts)
@@ -484,7 +489,7 @@ newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE
     
     # The sum() function recovers the sign in the sapply() call here
     sliceOrientation <- list(sliceOrientation[1:3], sliceOrientation[4:6], throughSliceOrientation)
-    sliceDirections <- round(sapply(sliceOrientation, function (x) which(abs(x) == 1) * sum(x)))
+    sliceDirections <- sapply(sliceOrientation, function (x) round(which(abs(x) == 1) * sum(x)))
     
     # Oblique slices case
     if (!is.numeric(sliceDirections) || length(sliceDirections) != 3)
@@ -642,12 +647,12 @@ newDicomMetadataFromFile <- function (fileName, checkFormat = TRUE, dictionary =
     }
     
     group <- readBin(connection, "integer", n=1, size=2, signed=FALSE)
-    if (group == 0x0008)
+    if (isTRUE(group == 0x0008))
         isDicomFile <- TRUE
-    else if (group == 0x0800)
+    else if (isTRUE(group == 0x0800))
         isDicomFile <- TRUE
         
-    if (group > 0x00ff)
+    if (isTRUE(group > 0x00ff))
         endian <- setdiff(c("big","little"), .Platform$endian)
     
     seek(connection, where=2, origin="current")

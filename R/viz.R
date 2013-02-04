@@ -1,6 +1,6 @@
 interpolatePalette <- function (colours, n, ...)
 {
-    rampFunction <- colorRamp(colours)
+    rampFunction <- colorRamp(colours, ...)
     colourMatrix <- round(rampFunction(0:(n-1)/(n-1)))
     rgbStrings <- apply(colourMatrix, 1, function (x) sprintf("#%02X%02X%02X",x[1],x[2],x[3]))
     return (rgbStrings)
@@ -199,8 +199,8 @@ createCombinedGraphics <- function (images, modes, colourScales, axes = 1:3, sli
     if (device == "png")
     {
         projectionNames <- c("sagittal", "coronal", "axial")
-        imageFiles <- threadSafeTempFile(rep(prefix, 2*nImages))
-        combinedFiles <- threadSafeTempFile(rep(prefix, 2))
+        imageFiles <- threadSafeTempFile(rep(basename(prefix), 2*nImages))
+        combinedFiles <- threadSafeTempFile(rep(basename(prefix), 2))
         
         for (axis in axes)
         {
