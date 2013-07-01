@@ -1,8 +1,10 @@
+.Deserialisers <- list()
+
 .Analyze <- list(
-    typeCodes=c(2,          4,          8,          16,         64),
-    rTypes=c(  "integer",  "integer",  "integer",  "double",   "double"),
-    sizes=c(    1,          2,          4,          4,          8),
-    isSigned=c( FALSE,      TRUE,       TRUE,       TRUE,       TRUE))
+    datatypes=list(codes=c(     2,          4,          8,          16,         64),
+                   rTypes=c(   "integer",  "integer",  "integer",  "double",   "double"),
+                   sizes=c(     1,          2,          4,          4,          8),
+                   isSigned=c(  FALSE,      TRUE,       TRUE,       TRUE,       TRUE)))
 
 .Dicom <- list(
     nonCharTypes=list(codes=c("OF", "FL", "FD", "SL", "SS", "UL", "US", "AT"),
@@ -11,7 +13,10 @@
                       counts=c(1, 1, 1, 1, 1, 1, 1, 2),
                       isSigned=c(rep(TRUE,5), rep(FALSE,3))),
     longTypes=c("OB", "OW", "OF", "SQ", "UT", "UN"),
-    convertibleTypes=c("OF", "FL", "FD", "SL", "SS", "UL", "US", "AT", "DS", "IS"))
+    convertibleTypes=c("OF", "FL", "FD", "SL", "SS", "UL", "US", "AT", "DS", "IS"),
+    transferSyntaxes=list("1.2.840.10008.1.2"   = list(endian="little",explicitTypes=FALSE),
+                          "1.2.840.10008.1.2.1" = list(endian="little",explicitTypes=TRUE),
+                          "1.2.840.10008.1.2.2" = list(endian="big",explicitTypes=TRUE)))
 
 .Nifti <- list(
     datatypes=list(codes=c(     2,          4,          8,          16,         64,         256,        512,        768),

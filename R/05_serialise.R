@@ -13,6 +13,7 @@ SerialisableObject <- setRefClass("SerialisableObject", methods=list(
     serialise = function (file = NULL)
     {
         originalClass <- class(.self)
+        originalPackage <- attr(originalClass,"package")
         attributes(originalClass) <- NULL
         
         # Fields with names ending in "." will not be returned, and therefore not be serialised
@@ -31,11 +32,12 @@ SerialisableObject <- setRefClass("SerialisableObject", methods=list(
 
         names(serialisedObject) <- fields
         attr(serialisedObject, "originalClass") <- originalClass
+        attr(serialisedObject, "originalPackage") <- originalPackage
 
         if (!is.null(file))
             save(serialisedObject, file=ensureFileSuffix(file,"Rdata"))
         
-        invisible (serialisedObject)
+        invisible(serialisedObject)
     }
 ))
 
@@ -46,6 +48,8 @@ setMethod("show", "SerialisableObject", function (object)
         summaryList <- object$summarise()
         if (is.list(summaryList) && all(c("labels","values") %in% names(summaryList)))
             printLabelledValues(summaryList$labels, summaryList$values)
+        else if (!is.null(names(summaryList)))
+            printLabelledValues(names(summaryList), as.character(summaryList))
     }
     else
         cat(paste("An object of class \"", class(object)[1], "\"\n", sep=""))
@@ -78,6 +82,21 @@ isDeserialisable <- function (object, expectedClass = NULL)
         return (TRUE)
 }
 
+serialiseReferenceObject <- function (object, file = NULL)
+{
+    if (is(object, "SerialisableObject"))
+        serialisedObject <- object$serialise()
+    else if (is.list(object))
+        serialisedObject <- lapply(object, serialiseReferenceObject)
+    else
+        report(OL$Error, "Object to serialise must be a list or a SerialisableObject")
+    
+    if (!is.null(file))
+        save(serialisedObject, file=ensureFileSuffix(file,"Rdata"))
+    
+    invisible(serialisedObject)
+}
+
 deserialiseReferenceObject <- function (file = NULL, object = NULL, raw = FALSE)
 {
     if (is.null(object))
@@ -88,7 +107,12 @@ deserialiseReferenceObject <- function (file = NULL, object = NULL, raw = FALSE)
     }
     
     if (!isDeserialisable(object))
-        report(OL$Error, "The specified object or file is not deserialisable")
+    {
+        if (is.list(object))
+            return (invisible(lapply(object, function(x) deserialiseReferenceObject(object=x))))
+        else
+            report(OL$Error, "The specified object or file is not deserialisable")
+    }
     else if (raw)
         return (invisible(object))
     
@@ -100,7 +124,32 @@ deserialiseReferenceObject <- function (file = NULL, object = NULL, raw = FALSE)
     })
     names(fields) <- names(object)
     
-    class <- getRefClass(attr(object, "originalClass"))
-    finalObject <- do.call(class$new, fields)
-    invisible (finalObject)
+    packageName <- attr(object, "originalPackage")
+    if (!is.null(packageName) && !(paste("package",packageName,sep=":") %in% search()))
+        require(packageName, character.only=TRUE)
+    
+    className <- attr(object, "originalClass")
+    if (className %in% names(.Deserialisers))
+        finalObject <- .Deserialisers[[className]](fields)
+    else
+    {
+        if (!is.null(packageName))
+            class <- getRefClass(className, where=as.environment(paste("package",packageName,sep=":")))
+        else
+            class <- getRefClass(className)
+        finalObject <- do.call(class$new, fields)
+    }
+    
+    invisible(finalObject)
+}
+
+registerDeserialiser <- function (className, deserialiser)
+{
+    if (!is.character(className) || length(className) != 1)
+        report(OL$Error, "Class name should be specified as a character string")
+    
+    deserialiser <- match.fun(deserialiser)
+    .Deserialisers[[className]] <<- deserialiser
+    
+    invisible(NULL)
 }

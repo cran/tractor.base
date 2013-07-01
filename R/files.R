@@ -130,14 +130,75 @@ copyImageFiles <- function (from, to, overwrite = FALSE, deleteOriginals = FALSE
     }
 }
 
-readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volumes = NULL, sparse = FALSE, mask = NULL)
+chooseDataTypeForImage <- function (image, format)
+{
+    if (image$isEmpty())
+        return (NULL)
+    else if (image$isSparse())
+        data <- image$getData()$getData()
+    else
+        data <- image$getData()
+    
+    # Get the available data types for the specified format
+    datatypes <- get(paste(".",format,sep=""))$datatypes
+    
+    # If double-mode data can be represented as integers, convert it to save space
+    # Note that this slows the function down
+    rType <- storage.mode(data)
+    if (rType == "double" && equivalent(as.double(data),as.integer(data)))
+        rType <- "integer"
+    
+    isSigned <- (rType == "double" || min(data,na.rm=TRUE) < 0)
+    
+    if (rType == "double")
+    {
+        singleTypeExists <- sum(datatypes$rTypes == "double" & datatypes$sizes == 4) == 1
+        doubleTypeExists <- sum(datatypes$rTypes == "double" & datatypes$sizes == 8) == 1
+        if (!singleTypeExists && !doubleTypeExists)
+            report(OL$Error, "Floating-point data cannot be stored using the specified file format")
+        
+        if (singleTypeExists && (isTRUE(getOption("tractorOutputPrecision") == "single") || !doubleTypeExists))
+            size <- 4
+        else
+            size <- 8
+        
+        isSigned <- TRUE
+        code <- datatypes$codes[datatypes$rTypes == "double" & datatypes$sizes == size]
+    }
+    else
+    {
+        compatible <- (datatypes$rTypes == "integer")
+        if (min(data,na.rm=TRUE) < 0)
+            compatible <- compatible & datatypes$isSigned
+        
+        maximumValues <- 2^(datatypes$sizes*8 - as.integer(datatypes$isSigned)) - 1
+        largestAbsoluteDataValue <- max(abs(max(data,na.rm=TRUE)), abs(min(data,na.rm=TRUE)))
+        compatible <- compatible & (largestAbsoluteDataValue <= maximumValues)
+        
+        # Prefer Analyze-compatible data types for NIfTI files
+        if (format == "Nifti" && any(compatible[datatypes$codes <= 64]))
+            compatible <- compatible & (datatypes$codes <= 64)
+        
+        if (!any(compatible))
+            report(OL$Error, "No compatible data type exists for the specified image and file format")
+        
+        maximumValues[!compatible] <- Inf
+        code <- datatypes$codes[which.min(maximumValues)]
+        size <- datatypes$sizes[datatypes$codes == code]
+        isSigned <- datatypes$isSigned[datatypes$codes == code]
+    }
+    
+    return (list(code=code, type=rType, size=size, isSigned=isSigned))
+}
+
+readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volumes = NULL, sparse = FALSE, mask = NULL, reorder = TRUE)
 {
     fileNames <- identifyImageFileNames(fileName, fileType)
     
     readFun <- switch(fileNames$format, Analyze=readAnalyze, Nifti=readNifti, Mgh=readMgh)
     info <- readFun(fileNames)
     
-    datatype <- info$imageMetadata$datatype
+    datatype <- info$storageMetadata$datatype
     endian <- info$storageMetadata$endian
     dims <- info$imageMetadata$imageDims
     voxelDims <- info$imageMetadata$voxelDims
@@ -194,7 +255,9 @@ readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volu
         }
     }
     
-    if (!metadataOnly)
+    if (metadataOnly)
+        data <- NULL
+    else
     {
         connection <- gzfile(fileNames$imageFile, "rb")
         if (fileNames$imageFile == fileNames$headerFile)
@@ -225,8 +288,11 @@ readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volu
                 toKeep <- which(currentData != 0)
                 if (!is.null(mask) && mask$getDimensionality() == (nDims-1))
                     toKeep <- intersect(toKeep, which(mask$getData() > 0))
-                coords <- rbind(coords, cbind(vectorToMatrixLocs(toKeep,dims[-nDims]),i))
-                values <- c(values, currentData[toKeep])
+                if (length(toKeep) > 0)
+                {
+                    coords <- rbind(coords, cbind(vectorToMatrixLocs(toKeep,dims[-nDims]),i))
+                    values <- c(values, currentData[toKeep])
+                }
             }
             
             if (!is.null(mask) && mask$getDimensionality() == nDims)
@@ -263,110 +329,35 @@ readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volu
             data <- data * slope + intercept
     }
     
-    rotationMatrix <- info$storageMetadata$xformMatrix[1:3,1:3]
-    absRotationMatrix <- abs(rotationMatrix)
-    tolerance <- 1e-3 * max(abs(voxelDims[1:min(3,nDims)]))
+    report(OL$Debug, "Image orientation is ", xformToOrientation(info$storageMetadata$xformMatrix))
     
-    # The rotation matrix should have exactly one nonzero element per row and column - if not, warn but try to figure out the closest primary orientation
-    if (!equivalent(rowSums(absRotationMatrix > tolerance), c(1,1,1)) || !equivalent(colSums(absRotationMatrix > tolerance), c(1,1,1)))
+    # The origin is world position (0,0,0); the xform is a voxel-to-world affine matrix
+    origin <- c(rep(1,min(nDims,3)), rep(0,max(0,nDims-3)))
+    if (equivalent(dim(info$storageMetadata$xformMatrix), c(4,4)))
     {
-        flag(OL$Warning, "The image is stored in a rotated frame of reference")
-        tolerance <- 0.5 * max(abs(voxelDims[1:min(3,nDims)]))
-        if (!equivalent(rowSums(absRotationMatrix > tolerance), c(1,1,1)) || !equivalent(colSums(absRotationMatrix > tolerance), c(1,1,1)))
-            report(OL$Error, "Cannot work out the primary orientation of the image")
+        tempOrigin <- (solve(info$storageMetadata$xformMatrix) %*% c(0,0,0,1)) + 1
+        origin[1:min(3,nDims)] <- tempOrigin[1:min(3,nDims)]
     }
     
-    dimPermutation <- apply(absRotationMatrix > tolerance, 1, which)
-    if (nDims > 3)
-        dimPermutation <- c(dimPermutation, 4:nDims)
-    else if (nDims < 3)
-        dimPermutation <- dimPermutation[1:nDims]
-    if (!identical(dimPermutation, seq_len(nDims)))
-    {
-        if (!metadataOnly)
-        {
-            if (sparse)
-                data$aperm(dimPermutation)
-            else
-                data <- aperm(data, dimPermutation)
-        }
-        dims <- dims[dimPermutation]
-        voxelDims <- voxelDims[dimPermutation]
-    }
-        
-    # Fix signs of voxel dimensions to correspond to LAS
-    voxelDims <- abs(voxelDims) * c(-1, rep(1,nDims-1))
-        
-    # Figure out which dimensions need to be flipped - we sum by row because the data dimensions have already been permuted
-    ordering <- round(rowSums(rotationMatrix) / c(abs(voxelDims[1:min(3,nDims)]),rep(1,max(0,3-nDims))))
-    ordering <- ordering * c(-1, 1, 1)
-        
-    if (nDims == 2)
-    {
-        origin <- 1 - ordering[1:2] * round(info$storageMetadata$xformMatrix[1:2,4]/voxelDims[1:2],2)
-        origin <- ifelse(ordering[1:2] == c(1,1), origin, dims-origin+1)
-    }
-    else
-    {
-        report(OL$Debug, "Image orientation is ", implode(c("I","P","R","","L","A","S")[(1:3)*ordering+4][dimPermutation[1:3]],sep=""))
-        origin <- c(1 - ordering[1:3] * round(info$storageMetadata$xformMatrix[1:3,4]/voxelDims[1:3],2), rep(0,nDims-3))
-        origin[1:3] <- ifelse(ordering[1:3] == c(1,1,1), origin[1:3], dims[1:3]-origin[1:3]+1)
-    }
-        
-    if (!metadataOnly && any(ordering[1:min(3,nDims)] < 0))
-    {
-        if (sparse)
-            data$flip(which(ordering[1:min(3,nDims)] < 0))
-        else
-        {
-            orderX <- (if (ordering[1] == 1) seq_len(dims[1]) else rev(seq_len(dims[1])))
-            orderY <- (if (ordering[2] == 1) seq_len(dims[2]) else rev(seq_len(dims[2])))
-            if (nDims > 2)
-                orderZ <- (if (ordering[3] == 1) seq_len(dims[3]) else rev(seq_len(dims[3])))
-            dimsToKeep <- setdiff(1:nDims, 1:3)
-
-            if (nDims == 2)
-                data <- data[orderX, orderY]
-            else if (nDims == 3)
-                data <- data[orderX, orderY, orderZ]
-            else
-                data <- array(apply(data, dimsToKeep, "[", orderX, orderY, orderZ), dim=dim(data))
-        }
-    }
+    image <- MriImage$new(imageDims=dims, voxelDims=voxelDims, voxelDimUnits=info$imageMetadata$voxelUnit, source=info$imageMetadata$source, origin=origin, storedXform=info$storageMetadata$xformMatrix, reordered=FALSE, tags=info$imageMetadata$tags, data=data)
     
-    imageMetadata <- MriImageMetadata$new(imagedims=dims, voxdims=voxelDims, voxunit=info$imageMetadata$voxelUnit, source=info$imageMetadata$source, datatype=datatype, origin=origin, storedXform=info$storageMetadata$xformMatrix, tags=info$imageMetadata$tags)
+    if (reorder)
+        image <- newMriImageByReordering(image)
     
-    if (metadataOnly)
-        invisible (imageMetadata)
-    else
-    {
-        image <- MriImage$new(data, imageMetadata)
-        invisible (image)
-    }
+    invisible (image)
 }
 
-newMriImageMetadataFromFile <- function (fileName, fileType = NULL)
+newMriImageFromFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volumes = NULL, sparse = FALSE, mask = NULL, reorder = TRUE)
 {
-    invisible (readImageFile(fileName, fileType, metadataOnly=TRUE))
+    readImageFile(fileName, fileType, metadataOnly, volumes, sparse, mask, reorder)
 }
 
-newMriImageFromFile <- function (fileName, fileType = NULL, volumes = NULL, sparse = FALSE, mask = NULL)
-{
-    invisible (readImageFile(fileName, fileType, metadataOnly=FALSE, volumes=volumes, sparse=sparse, mask=mask))
-}
-
-writeImageData <- function (image, connection, type = NULL, size = NULL, endian = .Platform$endian)
+writeImageData <- function (image, connection, type, size, endian = .Platform$endian)
 {
     if (!is(image, "MriImage"))
         report(OL$Error, "The specified image is not an MriImage object")
     
-    datatype <- image$getDataType()
     data <- image$getData()
-    
-    if (is.null(type))
-        type <- datatype$type
-    if (is.null(size))
-        size <- datatype$size
     
     if (image$isSparse())
     {
@@ -391,7 +382,7 @@ writeImageData <- function (image, connection, type = NULL, size = NULL, endian 
     }
 }
 
-writeMriImageToFile <- function (image, fileName = NULL, fileType = NA, datatype = NULL, overwrite = TRUE)
+writeImageFile <- function (image, fileName = NULL, fileType = NA, overwrite = TRUE)
 {
     if (!is(image, "MriImage"))
         report(OL$Error, "The specified image is not an MriImage object")
@@ -422,12 +413,20 @@ writeMriImageToFile <- function (image, fileName = NULL, fileType = NA, datatype
     imageFile <- ensureFileSuffix(fileStem, params$imageSuffix)
     fileNames <- list(fileStem=fileStem, headerFile=headerFile, imageFile=imageFile)
     
+    if (!image$isReordered() && params$format != "Nifti")
+        report(OL$Error, "An unreordered image can only be written to NIfTI format")
+    
     if (params$format == "Analyze")
-        writeMriImageToAnalyze(image, fileNames, gzipped=params$gzipped, datatype=datatype)
+        writeMriImageToAnalyze(image, fileNames, gzipped=params$gzipped)
     else if (params$format == "Nifti")
-        writeMriImageToNifti(image, fileNames, gzipped=params$gzipped, datatype=datatype)
+        writeMriImageToNifti(image, fileNames, gzipped=params$gzipped)
     else if (params$format == "Mgh")
-        writeMriImageToMgh(image, fileNames, gzipped=params$gzipped, datatype=datatype)
+        writeMriImageToMgh(image, fileNames, gzipped=params$gzipped)
     
     invisible (fileNames)
+}
+
+writeMriImageToFile <- function (image, fileName = NULL, fileType = NA, overwrite = TRUE)
+{
+    writeImageFile(image, fileName, fileType, overwrite)
 }
