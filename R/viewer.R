@@ -1,16 +1,100 @@
+#' @rdname viewer
+#' @export
 defaultInfoPanel <- function (point, data, imageNames)
 {
     usingQuartz <- isTRUE(names(dev.cur()) == "quartz")
     quitInstructions <- paste(ifelse(usingQuartz,"Press Esc","Right click"), "to exit", sep=" ")
     
     plot(NA, xlim=c(0,1), ylim=c(0,1), xlab="", ylab="", xaxt="n", yaxt="n", bty="n", main=paste("Location: (",implode(point,","),")",sep=""))
-    nImages <- length(imageNames)
-    yLocs <- c(0.9 - 0:(nImages-1) * 0.1, 0)
-    labels <- c(quitInstructions, paste(imageNames, ": ", sapply(data,function(x) signif(mean(x),6)), sep=""))
-    text(rep(0.5,nImages+1), yLocs, rev(labels), col=c(rep("red",nImages),"grey70"))
+    nImages <- min(4, length(imageNames))
+    yLocs <- 0.95 - cumsum(c(0,rep(c(0.1,0.13),nImages)))
+    yLocs[length(yLocs)] <- -0.05
+    labels <- quitInstructions
+    for (i in seq_len(nImages))
+    {
+        labels <- c(labels, {
+            if (is.numeric(data[[i]]))
+                as.character(signif(mean(data[[i]]),6))
+            else
+                data[[i]]
+        }, imageNames[i])
+    }
+    text(0.5, yLocs, rev(labels), col=c(rep(c("white","red"),nImages),"grey70"), cex=pmin(1,1/strwidth(rev(labels))), xpd=TRUE)
 }
 
-viewImages <- function (images, colourScales = NULL, point = NULL, interactive = TRUE, crosshairs = TRUE, orientationLabels = TRUE, infoPanel = defaultInfoPanel, ...)
+#' @rdname viewer
+#' @export
+timeSeriesPanel <- function (point, data, imageNames)
+{
+    usingQuartz <- isTRUE(names(dev.cur()) == "quartz")
+    quitInstructions <- paste(ifelse(usingQuartz,"Press Esc","Right click"), "to exit", sep=" ")
+    
+    lengths <- sapply(data, length)
+    suppressWarnings(range <- c(min(sapply(data,min,na.rm=T)), max(sapply(data,max,na.rm=T))))
+    range[is.infinite(range)] <- 0
+    plot(NA, xlim=c(1,max(lengths)), ylim=range, xlab="", ylab="", bty="n", main=paste("Location: (",implode(point,","),")",sep=""))
+    oldPars <- par(xpd=TRUE)
+    text(max(lengths)/2, range[1]-0.35*diff(range), quitInstructions, col="grey70")
+    par(oldPars)
+    
+    for (i in seq_along(data))
+    {
+        if (lengths[i] > 1)
+            lines(1:lengths[i], data[[i]], col="red", lwd=2)
+    }
+}
+
+#' A simple interactive viewer for MriImage objects
+#' 
+#' The \code{viewImages} function provides a simple interactive viewer for
+#' \code{MriImage} objects. 3D and 4D images may be used.
+#' 
+#' @param images An \code{MriImage} object, or list of \code{MriImage} objects.
+#' @param colourScales A list of colour scales to use for each image, which
+#'   will be recycled to the length of \code{images}. See
+#'   \code{\link{getColourScale}} for details. The default is to use greyscale.
+#' @param point For \code{viewImages}, a length 3 integer vector giving the
+#'   initial location of the crosshairs, in voxels. For info panel functions,
+#'   the current location of the crosshairs.
+#' @param interactive A single logical value. If \code{TRUE}, the plot is
+#'   interactive.
+#' @param crosshairs A single logical value. If \code{TRUE}, the crosshairs are
+#'   displayed.
+#' @param orientationLabels A single logical value. If \code{TRUE}, orientation
+#'   labels are displayed.
+#' @param fixedWindow A single logical value. If \code{TRUE}, each image is
+#'   windowed globally, rather than for each slice.
+#' @param indexNames A list whose elements are either \code{NULL} or a named
+#'   character vector giving the names associated with each index in the image.
+#' @param infoPanel A function with at least three arguments, which must plot
+#'   something to fill the bottom-right panel of the viewer after each change
+#'   of crosshair location. The three mandatory arguments correspond to the
+#'   current location in the image, the image values at that location, and the
+#'   names of each image. The \code{defaultInfoPanel} and
+#'   \code{timeSeriesPanel} functions are valid examples.
+#' @param \dots Additional arguments to \code{infoPanel}.
+#' @param data A list giving the data value(s) at the current crosshair
+#'   location in each image displayed. Typically numeric, but in principle may
+#'   be of any mode, and will be character mode when \code{indexNames} is not
+#'   \code{NULL}.
+#' @param imageNames A character vector giving a name for each image displayed.
+#' @return These functions are called for their side effects.
+#' 
+#' @note The \code{defaultInfoPanel} and \code{timeSeriesPanel} functions are
+#'   not intended to be called directly. They are simple examples of valid
+#'   values for the \code{infoPanel} argument to \code{viewImages}.
+#' @author Jon Clayden
+#' @seealso \code{\link{getColourScale}}
+#' @references Please cite the following reference when using TractoR in your
+#' work:
+#' 
+#' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
+#' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
+#' Journal of Statistical Software 44(8):1-18.
+#' \url{http://www.jstatsoft.org/v44/i08/}.
+#' @rdname viewer
+#' @export
+viewImages <- function (images, colourScales = NULL, point = NULL, interactive = TRUE, crosshairs = TRUE, orientationLabels = TRUE, fixedWindow = TRUE, indexNames = NULL, infoPanel = defaultInfoPanel, ...)
 {
     if (is(images, "MriImage"))
         images <- list(images)
@@ -37,12 +121,15 @@ viewImages <- function (images, colourScales = NULL, point = NULL, interactive =
     
     images3D <- lapply(images, function(x) {
         if (x$getDimensionality() == 4)
-            newMriImageByExtraction(x, 4, 1)
+            extractMriImage(x, 4, 1)
         else
             x
     })
     
-    windows <- lapply(images3D, function(x) range(x$getData(),na.rm=TRUE))
+    if (fixedWindow)
+        windows <- lapply(images3D, function(x) range(x$getData(),na.rm=TRUE))
+    else
+        windows <- rep(list(NULL), length(images3D))
     
     if (is.null(point))
         point <- round(dims / 2)
@@ -72,11 +159,16 @@ viewImages <- function (images, colourScales = NULL, point = NULL, interactive =
         }
         else
         {
-            data <- lapply(images, function(image) {
-                if (image$getDimensionality() == 4)
-                    image[point[1],point[2],point[3],]
+            data <- lapply(seq_along(images), function(i) {
+                if (images[[i]]$getDimensionality() == 4)
+                    images[[i]][point[1],point[2],point[3],]
+                else if (!is.null(indexNames[[i]]))
+                {
+                    value <- images[[i]][point[1],point[2],point[3]]
+                    es("#{value} (#{indexNames[[i]][as.character(value)]})")
+                }
                 else
-                    image[point[1],point[2],point[3]]
+                    images[[i]][point[1],point[2],point[3]]
             })
             infoPanel(point, data, imageNames, ...)
         }

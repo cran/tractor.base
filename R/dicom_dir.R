@@ -1,36 +1,96 @@
-sortDicomDirectory <- function (directory, deleteOriginals = FALSE, sortOn = "series", useSeriesTime = FALSE)
+dropCommonPrefix <- function (strings)
 {
-    if (!file.exists(directory) || !file.info(directory)$isdir)
-        report(OL$Error, "Specified path (", directory, ") does not exist or does not point to a directory")
+    if (length(strings) < 2)
+        return (strings)
+    
+    len <- min(sapply(strings, nchar, "bytes"))
+    if (len == 0)
+        return (strings)
+    else
+    {
+        bytes <- sapply(strings, function(x) charToRaw(x)[seq_len(len)], simplify="array")
+        matches <- apply(bytes, 1, function(x) all(x==x[1]))
+        if (all(matches))
+            return (rep("", length(strings)))
+        else
+        {
+            start <- which(!matches)[1]
+            return (substring(strings, start))
+        }
+    }
+}
+
+#' Sort a directory of DICOM files into series
+#' 
+#' This function sorts a directory containing DICOM files into subdirectories
+#' by series UID (DICOM tag 0x0020,0x000e), subject name (0x0010,0x0010) and/or
+#' scan date (0x0008,0x0020). Each unique identifier, together with its
+#' description for series, will be used as the name for a new subdirectory, and
+#' all relevant files will be copied into that subdirectory. Duplicate file
+#' names are disambiguated if necessary.
+#' 
+#' @param directories A character vector giving the directories to search for
+#'   DICOM files. Subdirectories will also be searched.
+#' @param deleteOriginals A single logical value. If \code{TRUE}, then the
+#'   source files will be deleted after being copied to their new locations,
+#'   making the operation a move rather than a copy. Nothing will be deleted if
+#'   the copy fails.
+#' @param sortOn The string \code{"series"}, \code{"subject"} or \code{"date"},
+#'   or any combination in the order desired. This will be the basis of the
+#'   sort, which will be nested if more than one type is specified.
+#' @param nested Logical value. If \code{TRUE} and \code{directories} is of
+#'   length 1, subdirectories will be created within the specified original
+#'   directory. Otherwise they will be created in the working directory.
+#' @return This function is called for its side effect.
+#' 
+#' @author Jon Clayden
+#' @seealso \code{\link{readDicomDirectory}} for reading DICOM files into an
+#' \code{MriImage} object.
+#' @references Please cite the following reference when using TractoR in your
+#' work:
+#' 
+#' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
+#' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
+#' Journal of Statistical Software 44(8):1-18.
+#' \url{http://www.jstatsoft.org/v44/i08/}.
+#' @export
+sortDicomDirectories <- function (directories, deleteOriginals = FALSE, sortOn = "series", nested = TRUE)
+{
+    invalid <- (!file.exists(directories) | !file.info(directories)$isdir)
+    if (any(invalid))
+        flag(OL$Warning, "#{pluralise('Path',n=sum(invalid))} #{implode(directories[invalid],', ',' and ')} do not exist or do not point to directories")
+    else
+        directories <- expandFileName(directories[!invalid])
+    
+    if (length(directories) < 1)
+        report(OL$Error, "No valid directories specified")
+    else if (nested && length(directories) > 1)
+        nested <- FALSE
     
     sortOn <- match.arg(sortOn, c("series","subject","date"), several.ok=TRUE)
     currentSort <- sortOn[1]
     remainingSorts <- sortOn[-1]
-    identifierTag <- switch(currentSort, series=(if (useSeriesTime) c(0x0008,0x0031) else c(0x0020,0x0011)), subject=c(0x0010,0x0010), date=c(0x0008,0x0020))
-    descriptionTag <- switch(currentSort, series=c(0x0008,0x103e), subject=c(0x0010,0x0010), date=c(0x0008,0x0020))
+    identifierTag <- switch(currentSort, series=c(0x0020,0x000e), subject=c(0x0010,0x0010), date=c(0x0008,0x0020))
     
-    directory <- expandFileName(directory)
-    files <- expandFileName(list.files(directory, full.names=TRUE, recursive=TRUE))
+    files <- expandFileName(list.files(directories, full.names=TRUE, recursive=TRUE))
     files <- files[!file.info(files)$isdir]
     nFiles <- length(files)
 
     count <- 0
     identifiers <- character(nFiles)
     
-    report(OL$Info, "Reading ", currentSort, " identifiers from ", nFiles, " files")
+    report(OL$Info, "Reading #{currentSort} identifiers from #{nFiles} files")
     for (i in 1:nFiles)
     {
-        metadata <- try(newDicomMetadataFromFile(files[i], stopTag=identifierTag), silent=TRUE)
+        metadata <- try(readDicomFile(files[i], stopTag=identifierTag), silent=TRUE)
         if (is.null(metadata) || ("try-error" %in% class(metadata)))
         {
-            report(OL$Info, "Skipping ", files[i])
+            report(OL$Info, "Skipping #{files[i]}")
             identifiers[i] <- NA_character_
         }
         else
         {
             identifiers[i] <- as.character(metadata$getTagValue(identifierTag[1], identifierTag[2]))
-            if (useSeriesTime && currentSort == "series")
-                identifiers[i] <- sub("\\..+$", "", identifiers[i], perl=TRUE)
             count <- count + 1
             if (count %% 100 == 0)
                 report(OL$Verbose, "Done ", count)
@@ -40,60 +100,88 @@ sortDicomDirectory <- function (directory, deleteOriginals = FALSE, sortOn = "se
     nDicomFiles <- count
     if (nDicomFiles == 0)
         report(OL$Error, "No readable DICOM files were found")
-
+    
     uniqueIdentifiers <- na.omit(sort(unique(identifiers)))
-    report(OL$Info, "Found ", switch(currentSort,series="series",subject="subjects",date="dates"), " ", implode(uniqueIdentifiers,", "), "; creating subdirectories")
+    shortIdentifiers <- dropCommonPrefix(uniqueIdentifiers)
+    report(OL$Info, "Found ", switch(currentSort,series="series",subject="subjects",date="dates"), " ", implode(shortIdentifiers,", "), "; creating subdirectories")
     
     identifierWidth <- max(nchar(uniqueIdentifiers))
     
-    for (id in uniqueIdentifiers)
+    for (i in seq_along(uniqueIdentifiers))
     {
-        matchingFiles <- which(identifiers==id)
-        if (length(matchingFiles) > 0)
+        matchingFiles <- which(identifiers == uniqueIdentifiers[i])
+        
+        if (currentSort == "series")
         {
-            metadata <- newDicomMetadataFromFile(files[matchingFiles[1]], stopTag=descriptionTag)
-            description <- metadata$getTagValue(descriptionTag[1], descriptionTag[2])
-            
-            if (currentSort == "series")
-            {
-                report(OL$Info, "Series ", id, " includes ", length(matchingFiles), " files; description is \"", description, "\"")
-                subdirectory <- paste(sprintf(paste("%0",identifierWidth,"d",sep=""),as.integer(id)), gsub("\\W","",description,perl=TRUE), sep="_")
-            }
-            else if (currentSort == "subject")
-            {
-                report(OL$Info, "Subject ", id, " includes ", length(matchingFiles), " files")
-                subdirectory <- gsub("\\W", "", description, perl=TRUE)
-            }
-            else if (currentSort == "date")
-            {
-                report(OL$Info, "Date ", id, " includes ", length(matchingFiles), " files")
-                subdirectory <- as.character(description)
-            }
-            
-            if (!file.exists(file.path(directory, subdirectory)))
-                dir.create(file.path(directory, subdirectory))
-            
-            currentIdFiles <- basename(files[matchingFiles])
-            duplicates <- duplicated(currentIdFiles)
-            if (any(duplicates))
-                currentIdFiles[duplicates] <- paste(currentIdFiles[duplicates], seq_len(sum(duplicates)), sep="_")
-            
-            from <- files[matchingFiles]
-            to <- file.path(directory,subdirectory,currentIdFiles)
-            inPlace <- from == to
-            success <- file.copy(from[!inPlace], to[!inPlace])
-            
-            if (!all(success))
-                report(OL$Warning, "Not all files copied successfully for ", currentSort, " ", id, " - nothing will be deleted")
-            else if (deleteOriginals)
-                unlink(from[!inPlace])
-            
-            if (length(remainingSorts) > 0)
-                sortDicomDirectory(file.path(directory,subdirectory), TRUE, sortOn=remainingSorts)
+            metadata <- readDicomFile(files[matchingFiles[1]], stopTag=c(0x0008,0x103e))
+            description <- metadata$getTagValue(0x0008, 0x103e)
+            subdirectory <- es("#{shortIdentifiers[i]}_#{ore.subst('[^A-Za-z0-9]+','_',description,all=TRUE)}")
+            report(OL$Info, "Series #{shortIdentifiers[i]} includes #{length(matchingFiles)} files; description is \"#{description}\"")
         }
+        else
+        {
+            subdirectory <- ore.subst("[^A-Za-z0-9]+", "_", shortIdentifiers[i], all=TRUE)
+            report(OL$Info, "#{ore.subst('^.',toupper,currentSort)} #{shortIdentifiers[i]} includes #{length(matchingFiles)} files")
+        }
+        
+        if (nested)
+            subdirectory <- file.path(directories, subdirectory)
+        if (!file.exists(subdirectory))
+            dir.create(subdirectory)
+        
+        currentIdFiles <- basename(files[matchingFiles])
+        duplicates <- duplicated(currentIdFiles)
+        if (any(duplicates))
+            currentIdFiles[duplicates] <- paste(currentIdFiles[duplicates], seq_len(sum(duplicates)), sep="_")
+        
+        from <- files[matchingFiles]
+        to <- file.path(subdirectory,currentIdFiles)
+        inPlace <- from == to
+        success <- file.copy(from[!inPlace], to[!inPlace])
+        
+        if (!all(success))
+            report(OL$Warning, "Not all files copied successfully for #{currentSort} #{shortIdentifiers[i]} - nothing will be deleted")
+        else if (deleteOriginals)
+            unlink(from[!inPlace])
+        
+        if (length(remainingSorts) > 0)
+            sortDicomDirectories(subdirectory, TRUE, sortOn=remainingSorts, nested=TRUE)
     }
 }
 
+#' Read a directory of DICOM files
+#' 
+#' This function scans a directory for files in DICOM format, and converts them
+#' to a single Analyze/NIfTI-format image of the appropriate dimensionality.
+#' 
+#' @param dicomDir Character vector of length one giving the name of a
+#'   directory containing DICOM files.
+#' @param readDiffusionParams Logical value: should diffusion MRI parameters
+#'   (b-values and gradient directions) be retrieved from the files if
+#'   possible?
+#' @param untileMosaics Logical value: should Siemens mosaic images be
+#'   converted into 3D volumes? This may occasionally be performed in error,
+#'   which can be prevented by setting this value to \code{FALSE}.
+#' @return A list containing elements
+#'   \describe{
+#'     \item{image}{An \code{\linkS4class{MriImage}} object.}
+#'     \item{bValues}{Diffusion b-values, if requested. Will be \code{NA} if
+#'       the information could not be found in files.}
+#'     \item{bVectors}{Diffusion gradient vectors, if requested. Will be
+#'       \code{NA} if the information could not be found in the files.}
+#'   }
+#' 
+#' @author Jon Clayden
+#' @seealso \code{\linkS4class{DicomMetadata}}, \code{\linkS4class{MriImage}},
+#' \code{\link{sortDicomDirectories}}.
+#' @references Please cite the following reference when using TractoR in your
+#' work:
+#' 
+#' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
+#' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
+#' Journal of Statistical Software 44(8):1-18.
+#' \url{http://www.jstatsoft.org/v44/i08/}.
+#' @export
 readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMosaics = TRUE)
 {
     if (!file.exists(dicomDir) || !file.info(dicomDir)$isdir)
@@ -104,15 +192,12 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
     files <- files[!file.info(files)$isdir]
     nFiles <- length(files)
     
-    dictionary <- NULL
-    data("dictionary", package="tractor.base", envir=environment(NULL))
-
     report(OL$Info, "Reading image information from ", nFiles, " files")
     info <- data.frame(seriesNumber=numeric(nFiles), seriesDescription=character(nFiles), acquisitionNumber=numeric(nFiles), imageNumber=numeric(nFiles), sliceLocation=numeric(nFiles), stringsAsFactors=FALSE)
     images <- vector("list", nFiles)
     if (readDiffusionParams)
     {
-        bValues <- numeric(nFiles)
+        bValues <- echoSeparations <- numeric(nFiles)
         bVectors <- matrix(NA, nrow=3, ncol=nFiles)
     }
     
@@ -123,7 +208,7 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
     count <- 0
     for (i in seq_along(files))
     {
-        metadata <- newDicomMetadataFromFile(files[i], dictionary=dictionary)
+        metadata <- readDicomFile(files[i])
         if (is.null(metadata))
         {
             # Not a DICOM file - skip it
@@ -134,7 +219,9 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
         else if (!seenValidFile)
         {
             # Read slice dimensions and orientation once - these are assumed not to vary across files
-            sliceDim <- metadata$getTagValue(0x0018,0x0050)
+            sliceDim <- metadata$getTagValue(0x0018,0x0088)
+            if (is.na(sliceDim))
+                sliceDim <- metadata$getTagValue(0x0018,0x0050)
             sliceOrientation <- metadata$getTagValue(0x0020,0x0037)
             
             # Calculate through-slice orientation (in LPS convention)
@@ -163,6 +250,7 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
                 report(OL$Info, "Attempting to read diffusion parameters using ", diffusion$defType, " DICOM convention")
             bValues[i] <- diffusion$bval
             bVectors[,i] <- diffusion$bvec
+            echoSeparations[i] <- ifelse(is.null(diffusion$echoSeparation), NA, diffusion$echoSeparation)
         }
         
         if (!seenValidFile)
@@ -182,6 +270,7 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
     {
         bValues <- bValues[valid]
         bVectors <- bVectors[,valid]
+        echoSeparations <- echoSeparations[valid]
     }
     
     if (length(unique(info$seriesDescription)) > 1)
@@ -231,6 +320,11 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
         nSlices <- images[[1]]$imageDims[3]
         nVolumes <- nDicomFiles
         imageDims <- c(images[[1]]$imageDims, nVolumes)
+        
+        # Some mosaic files store the per-slice TR, but we want the per-volume TR
+        # Assume that a TR below 500 ms must be per-slice
+        if (mosaic && repetitionTime < 0.5)
+            repetitionTime <- repetitionTime * nSlices
         voxelDims <- c(images[[1]]$voxelDims, repetitionTime)
     }
     else
@@ -263,10 +357,12 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
     {
         bValues <- bValues[sortOrder]
         bVectors <- bVectors[,sortOrder]
+        echoSeparations <- echoSeparations[sortOrder]
         
         # Initialisation
         volumeBValues <- rep(NA, nVolumes)
         volumeBVectors <- matrix(NA, nrow=3, ncol=nVolumes)
+        volumeEchoSeparations <- rep(NA, nVolumes)
     }
     
     # Insert data into the appropriate places
@@ -289,6 +385,7 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
         {
             volumeBValues[volume] <- bValues[i]
             volumeBVectors[,volume] <- bVectors[,i]
+            volumeEchoSeparations[volume] <- echoSeparations[i]
         }
     }
 
@@ -325,25 +422,22 @@ readDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMos
     # Invert position for Y direction due to switch to LAS convention
     imagePosition[2] <- -imagePosition[2]
     
-    # Origin is 0 for temporal dimensions
-    # For other dimensions, use the image position (which is the centre of the first voxel stored)
-    origin <- rep(0, length(dimsToKeep))
-    origin[1:3] <- 1 - ordering[1:3] * (imagePosition / voxelDims[1:3])
-    origin[1:3] <- ifelse(ordering[1:3] == c(1,1,1), origin[1:3], imageDims[1:3]-origin[1:3]+1)
+    # For origin, use the image position (which is the centre of the first voxel stored)
+    origin <- 1 - ordering[1:3] * (imagePosition / voxelDims[1:3])
+    origin <- ifelse(ordering[1:3] == c(1,1,1), origin, imageDims[1:3]-origin+1)
     
     # Create the final image
-    image <- newMriImageWithData(data, imageDims=imageDims, voxelDims=voxelDims, voxelDimUnits=c("mm","s"), origin=origin, tags=list())
+    image <- asMriImage(data, imageDims=imageDims, voxelDims=voxelDims, voxelDimUnits=c("mm","s"), origin=origin, tags=list())
     
     returnValue <- list(image=image, seriesDescriptions=unique(info$seriesDescription))
     if (readDiffusionParams)
-        returnValue <- c(returnValue, list(bValues=volumeBValues, bVectors=volumeBVectors))
+    {
+        # Invert Y direction again
+        volumeBVectors[2,] <- -volumeBVectors[2,]
+        returnValue <- c(returnValue, list(bValues=volumeBValues, bVectors=volumeBVectors, echoSeparations=volumeEchoSeparations))
+    }
     
     invisible (returnValue)
-}
-
-newMriImageFromDicomDirectory <- function (dicomDir, readDiffusionParams = FALSE, untileMosaics = TRUE)
-{
-    readDicomDirectory(dicomDir, readDiffusionParams, untileMosaics)
 }
 
 readImageParametersFromMetadata <- function (metadata, untileMosaics = TRUE, metadataOnly = FALSE)
@@ -418,7 +512,10 @@ readImageParametersFromMetadata <- function (metadata, untileMosaics = TRUE, met
     else
     {
         nDims <- 3
-        voxelDims <- c(voxelDims, metadata$getTagValue(0x0018, 0x0050))
+        if (!is.na(metadata$getTagValue(0x0018,0x0088)))
+            voxelDims <- c(voxelDims, metadata$getTagValue(0x0018,0x0088))
+        else
+            voxelDims <- c(voxelDims, metadata$getTagValue(0x0018,0x0050))
     }
     
     dims <- c(columns, rows, slices)
@@ -535,13 +632,14 @@ readDiffusionParametersFromMetadata <- function (metadata)
     {
         bval <- metadata$getTagValue(0x0019, 0x100c)
         bvec <- metadata$getTagValue(0x0019, 0x100e)
+        echoSeparation <- metadata$getAsciiFields("EchoSpacing") / 1e6 * (metadata$getAsciiFields("EPIFactor") - 1)
         
         if (is.na(bval))
-            return (list(bval=NA, bvec=rep(NA,3), defType="none"))
+            return (list(bval=NA, bvec=rep(NA,3), echoSeparation=echoSeparation, defType="none"))
         else if (bval == 0 || identical(bvec, rep(0,3)))
-            return (list(bval=0, bvec=rep(0,3), defType="Siemens"))
+            return (list(bval=0, bvec=rep(0,3), echoSeparation=echoSeparation, defType="Siemens"))
         else
-            return (list(bval=bval, bvec=bvec, defType="Siemens"))
+            return (list(bval=bval, bvec=bvec, echoSeparation=echoSeparation, defType="Siemens"))
     }
     else
         return (list(bval=NA, bvec=rep(NA,3), defType="none"))

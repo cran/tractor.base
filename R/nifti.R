@@ -8,6 +8,15 @@ hasNiftiMagicString <- function (fileName)
     return (any(sapply(unlist(.Nifti$magicStrings,recursive=FALSE), identical, magicString)))
 }
 
+niftiDatatype <- function (typeCode)
+{
+    typeIndex <- which(.Nifti$datatypes$codes == typeCode)
+    if (length(typeIndex) != 1)
+        report(OL$Error, "NIfTI data type code #{typeCode} is not supported")
+    datatype <- list(code=typeCode, type=.Nifti$datatypes$rTypes[typeIndex], size=.Nifti$datatypes$sizes[typeIndex], isSigned=.Nifti$datatypes$isSigned[typeIndex])
+    return (datatype)
+}
+
 readNifti <- function (fileNames)
 {
     getXformMatrix <- function ()
@@ -49,8 +58,11 @@ readNifti <- function (fileNames)
     size <- readBin(connection, "integer", n=1, size=4)
     
     nonNativeEndian <- setdiff(c("big","little"), .Platform$endian)
-    endian <- switch(as.character(size), "348"=.Platform$endian, "540"=.Platform$endian, "23553"=nonNativeEndian, "7170"=nonNativeEndian)
-    niftiVersion <- switch(as.character(size), "348"=1, "540"=2, "23553"=1, "7170"=2)
+    endian <- switch(as.character(size), "348"=.Platform$endian, "540"=.Platform$endian, "1543569408"=nonNativeEndian, "469893120"=nonNativeEndian)
+    niftiVersion <- switch(as.character(size), "348"=1, "540"=2, "1543569408"=1, "469893120"=2)
+    
+    if (is.null(endian))
+        report(OL$Error, "#{fileNames$headerFile} does not seem to be a valid NIfTI header file")
 
     if (niftiVersion == 1)
     {
@@ -102,11 +114,7 @@ readNifti <- function (fileNames)
     dims <- dims[1:ndims + 1]
     
     xformMatrix <- getXformMatrix()
-    
-    typeIndex <- which(.Nifti$datatypes$codes == typeCode)
-    if (length(typeIndex) != 1)
-        report(OL$Error, "Data type of file ", fileNames$imageFile, " (", typeCode, ") is not supported")
-    datatype <- list(code=typeCode, type=.Nifti$datatypes$rTypes[typeIndex], size=.Nifti$datatypes$sizes[typeIndex], isSigned=.Nifti$datatypes$isSigned[typeIndex])
+    datatype <- niftiDatatype(typeCode)
     
     # We're only interested in the bottom 5 bits (spatial and temporal units)
     spatialUnitCode <- packBits(intToBits(unitCode) & intToBits(7), "integer")
@@ -124,15 +132,53 @@ readNifti <- function (fileNames)
     invisible (list(imageMetadata=imageMetadata, storageMetadata=storageMetadata))
 }
 
-writeMriImageToNifti <- function (image, fileNames, gzipped = FALSE, datatype = NULL)
+writeNifti <- function (image, fileNames, gzipped = FALSE, datatype = NULL, maxSize = NULL)
 {
     if (!is(image, "MriImage"))
         report(OL$Error, "The specified image is not an MriImage object")
     
-    description <- "TractoR NIfTI writer v2.4.0"
+    description <- "TractoR NIfTI writer v3.0.0"
     fileFun <- (if (gzipped) gzfile else file)
     
+    slope <- 1
+    intercept <- 0
+    dataRange <- range(image, na.rm=TRUE)
+    dataImage <- image
     datatype <- chooseDataTypeForImage(image, "Nifti")
+    if (!is.null(maxSize) && maxSize < datatype$size)
+    {
+        if (maxSize >= 4)
+            datatype <- niftiDatatype(16)
+        else
+        {
+            originalData <- as.array(image)
+            if (any(is.na(originalData)))
+                dataRange <- range(0, dataRange)
+            
+            datatype <- niftiDatatype(ifelse(maxSize >= 2, 4, 2))
+            if (datatype$isSigned)
+            {
+                typeRange <- 2^(datatype$size*8-1) * c(-1,1) - c(0,1)
+                slope <- diff(dataRange) / diff(typeRange)
+                intercept <- -typeRange[1] * slope
+            }
+            else
+            {
+                typeRange <- c(0, 2^(datatype$size*8) - 1)
+                slope <- diff(dataRange) / typeRange[2]
+                intercept <- dataRange[1]
+            }
+            
+            # NAs are typically not preserved when the data type is changed, so we replace them with zeros
+            # The original image is replaced by its approximation; its source will be (re)set below
+            dataImage <- image$copy()$map(function(x) as.integer(round((ifelse(is.na(x),0,x)-intercept)/slope)))
+            image$map(function(x,y) y * slope + intercept, dataImage)
+            newData <- as.array(image)
+            meanRelativeDifference <- mean(abs((newData-originalData) / originalData), na.rm=TRUE)
+            if (meanRelativeDifference > 1e-4)
+                report(OL$Warning, "Mean relative error in compressed image is #{meanRelativeDifference*100}%", round=2)
+        }
+    }
     
     ndims <- image$getDimensionality()
     fullDims <- c(ndims, image$getDimensions(), rep(1,7-ndims))
@@ -146,28 +192,10 @@ writeMriImageToNifti <- function (image, fileNames, gzipped = FALSE, datatype = 
     else
         unitCode <- sum(unitCode)
     
-    if (image$isReordered())
-    {
-        origin <- (image$getOrigin() - 1) * abs(image$getVoxelDimensions())
-        if (length(origin) > 3)
-            origin <- origin[1:3]
-        else if (length(origin) < 3)
-            origin <- c(origin, rep(0,3-length(origin)))
-        origin <- ifelse(origin < 0, rep(0,3), origin)
-        origin[2:3] <- -origin[2:3]
-        sformRows <- c(-fullVoxelDims[2], 0, 0, origin[1],
-                        0, fullVoxelDims[3], 0, origin[2],
-                        0, 0, fullVoxelDims[4], origin[3])
-        
-        quaternion <- list(q=c(0,0,1,0), offset=origin, handedness=-1)
-    }
-    else
-    {
-        xform <- image$getStoredXformMatrix()
-        sformRows <- c(xform[1,], xform[2,], xform[3,])
-        quaternion <- xformToQuaternion(xform)
-        fullVoxelDims[1] <- quaternion$handedness
-    }
+    xform <- image$getXform()
+    sformRows <- c(xform[1,], xform[2,], xform[3,])
+    quaternion <- xformToQuaternion(xform)
+    fullVoxelDims[1] <- quaternion$handedness
     
     connection <- fileFun(fileNames$headerFile, "w+b")
     
@@ -181,11 +209,11 @@ writeMriImageToNifti <- function (image, fileNames, gzipped = FALSE, datatype = 
     writeBin(fullVoxelDims, connection, size=4)
     
     # Voxel offset, data scaling slope and intercept
-    writeBin(as.double(c(352,1,0)), connection, size=4)
+    writeBin(as.double(c(352,slope,intercept)), connection, size=4)
     
     writeBin(raw(3), connection)
     writeBin(as.integer(unitCode), connection, size=1)
-    writeBin(as.double(rev(range(image$getData(),na.rm=TRUE))), connection, size=4)
+    writeBin(as.double(rev(dataRange)), connection, size=4)
     writeBin(raw(16), connection)
     writeBin(charToRaw(description), connection, size=1)
     writeBin(raw(24+80-nchar(description)), connection)
@@ -212,7 +240,7 @@ writeMriImageToNifti <- function (image, fileNames, gzipped = FALSE, datatype = 
         connection <- fileFun(fileNames$imageFile, "w+b")
     }
     
-    writeImageData(image, connection, datatype$type, datatype$size)
+    writeImageData(dataImage, connection, datatype$type, datatype$size)
     close(connection)
     
     if (image$isInternal())
