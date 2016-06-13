@@ -1,13 +1,13 @@
-d9bb9b085d5f749335ecbd68d2ac5e8f *DESCRIPTION
+b359c3b5736c3f3a7bb7146c3b5a900d *DESCRIPTION
 e0b9c31556652eb38e81f3f71730e8bd *NAMESPACE
 0edc59fd39e9e49b2f7d45131942f8e4 *R/00_constants.R
 9fee1eeb86ba6bb456026d8dd6e63e55 *R/05_serialise.R
 219ede50b722cf1043e1d2963980d95d *R/08_sparse.R
-b9ef5c7f249cd4019bc3d5073fc415bc *R/10_mri_image.R
+05e96754a9a583c66d594822289850a4 *R/10_mri_image.R
 d2c5feee672bb6dba78defd85b0c1a7f *R/15_dicom.R
 b2f755a8847e5faa1575cbe1ea37d536 *R/analyze.R
 84893f10dad6213d0c9146a1d26245a7 *R/deprecated.R
-f9f1ac17db9fa9f2595f4427669e7402 *R/dicom_dir.R
+628ed6184cd966e8bbdd40ade2483b0b *R/dicom_dir.R
 1da5f9da0fece0e63ac8cfca41034f9f *R/files.R
 cc9d0404fdabe6a7bea39756937dcc3a *R/internal.R
 1a21cdb68de670c91ceea1627ca75002 *R/mgh.R
@@ -46,7 +46,7 @@ fca2e249ca18a804945551af03a9bd80 *man/promote.Rd
 c4ca7dc75f2858d3a01ac21d043385b5 *man/readDicomDirectory.Rd
 e5a38857dcac17ee5b402443d2e50f4c *man/readDicomFile.Rd
 2da9db6cfec8b7e60e449dbf2a0468e0 *man/serialisation.Rd
-2145ed665352c78a93b0d50e8f43ff6a *man/sortDicomDirectories.Rd
+3011c91f34939e4662b34346bcb9c202 *man/sortDicomDirectories.Rd
 4280bf72ac0e9a216fb11f768558f431 *man/threadSafeTempFile.Rd
 c042e00813c4adf5ce66b5cc8de622a3 *man/tractor.base-deprecated.Rd
 4bc82fa39c2fa596285895dec3c7662e *man/vector.Rd
