@@ -382,6 +382,8 @@ readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volu
         }
     }
     
+    report(OL$Debug, "Image datatype is #{datatype$size}-byte #{ifelse(datatype$isSigned,'signed','unsigned')} #{datatype$type}")
+    
     if (metadataOnly)
         data <- NULL
     else
@@ -466,7 +468,13 @@ readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volu
         origin <- tempOrigin[1:3]
     }
     
-    image <- MriImage$new(imageDims=dims, voxelDims=voxelDims, voxelDimUnits=info$imageMetadata$voxelUnit, source=info$imageMetadata$source, origin=origin, storedXform=info$storageMetadata$xformMatrix, reordered=FALSE, tags=info$imageMetadata$tags, data=data)
+    tagsFileName <- ensureFileSuffix(fileNames$fileStem, "tags")
+    if (file.exists(tagsFileName))
+        tags <- deduplicate(yaml::yaml.load_file(tagsFileName), info$imageMetadata$tags)
+    else
+        tags <- info$imageMetadata$tags
+    
+    image <- MriImage$new(imageDims=dims, voxelDims=voxelDims, voxelDimUnits=info$imageMetadata$voxelUnit, source=info$imageMetadata$source, origin=origin, storedXform=info$storageMetadata$xformMatrix, reordered=FALSE, tags=tags, data=data)
     
     if (reorder)
         image <- reorderMriImage(image)
@@ -487,7 +495,7 @@ writeImageData <- function (image, connection, type, size, endian = .Platform$en
         nDims <- image$getDimensionality()
         for (i in seq_len(dims[nDims]))
         {
-            indices <- alist(x=,y=,z=,t=,u=,v=,w=)[1:nDims]
+            indices <- alist(i=,j=,k=,t=,u=,v=,w=)[1:nDims]
             indices[[nDims]] <- i
             currentData <- as.array(do.call("[", c(list(data),indices)))
             

@@ -32,15 +32,45 @@ timeSeriesPanel <- function (point, data, imageNames)
     lengths <- sapply(data, length)
     suppressWarnings(range <- c(min(sapply(data,min,na.rm=T)), max(sapply(data,max,na.rm=T))))
     range[is.infinite(range)] <- 0
-    plot(NA, xlim=c(1,max(lengths)), ylim=range, xlab="", ylab="", bty="n", main=paste("Location: (",implode(point,","),")",sep=""))
-    oldPars <- par(xpd=TRUE)
-    text(max(lengths)/2, range[1]-0.35*diff(range), quitInstructions, col="grey70")
-    par(oldPars)
+    plot(NA, xlim=c(1,max(lengths)), ylim=range, xlab=quitInstructions, ylab="intensity", col.lab="grey70", bty="n", main=paste("Location: (",implode(point,","),")",sep=""))
     
     for (i in seq_along(data))
     {
         if (lengths[i] > 1)
             lines(1:lengths[i], data[[i]], col="red", lwd=2)
+    }
+}
+
+#' @rdname viewer
+#' @export
+polarPlotPanel <- function (point, data, imageNames, directions, bValues = NULL)
+{
+    usingQuartz <- isTRUE(names(dev.cur()) == "quartz")
+    quitInstructions <- paste(ifelse(usingQuartz,"Press Esc","Right click"), "to exit", sep=" ")
+    
+    if (is.null(bValues))
+        bValues <- rep(1, nrow(directions))
+    
+    lengths <- sapply(data, length)
+    data <- data[[which(lengths==nrow(directions))]]
+    maxDataValue <- suppressWarnings(max(data[bValues>0],na.rm=T))
+        
+    correlations <- abs(cor(cbind(abs(directions), data))[1:3,4])
+    axes <- setdiff(1:3, which.min(correlations))
+    view <- c("sagittal","coronal","axial")[which.min(correlations)]
+    
+    plot(NA, xlim=c(-maxDataValue,maxDataValue), ylim=c(-maxDataValue,maxDataValue), xlab=quitInstructions, ylab="intensity", col.lab="grey70", bty="n", main=paste("Location: (",implode(point,","),")\nView: ",view,sep=""), xaxt="n", yaxt="n", asp=1)
+    ticks <- list(x=pretty(par("xaxp")[1:2]), y=pretty(par("yaxp")[1:2]))
+    axis(1, ticks$x, abs(ticks$x))
+    axis(2, ticks$y, abs(ticks$y))
+    
+    for (b in setdiff(sort(unique(bValues)),0))
+    {
+        i <- (bValues == b)
+        currentDirections <- rbind(directions[i,], -directions[i,])
+        currentData <- rep(data[i],2)
+        order <- order(atan2(currentDirections[,axes[2]], currentDirections[,axes[1]]))
+        polygon((currentDirections[,axes]*currentData)[order,], col=rgb(matrix(correlations,nrow=1)))
     }
 }
 
@@ -78,6 +108,8 @@ timeSeriesPanel <- function (point, data, imageNames)
 #'   be of any mode, and will be character mode when \code{indexNames} is not
 #'   \code{NULL}.
 #' @param imageNames A character vector giving a name for each image displayed.
+#' @param directions A matrix of 3D acquisition direction vectors, one per row.
+#' @param bValues A vector of b-values, if the image is diffusion-weighted.
 #' @return These functions are called for their side effects.
 #' 
 #' @note The \code{defaultInfoPanel} and \code{timeSeriesPanel} functions are
@@ -127,7 +159,7 @@ viewImages <- function (images, colourScales = NULL, point = NULL, interactive =
     })
     
     if (fixedWindow)
-        windows <- lapply(images3D, function(x) range(x$getData(),na.rm=TRUE))
+        windows <- lapply(images3D, function(x) range(x$getData(),na.rm=TRUE,finite=TRUE))
     else
         windows <- rep(list(NULL), length(images3D))
     

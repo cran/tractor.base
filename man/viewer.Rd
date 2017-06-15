@@ -3,12 +3,15 @@
 \name{defaultInfoPanel}
 \alias{defaultInfoPanel}
 \alias{timeSeriesPanel}
+\alias{polarPlotPanel}
 \alias{viewImages}
 \title{A simple interactive viewer for MriImage objects}
 \usage{
 defaultInfoPanel(point, data, imageNames)
 
 timeSeriesPanel(point, data, imageNames)
+
+polarPlotPanel(point, data, imageNames, directions, bValues = NULL)
 
 viewImages(images, colourScales = NULL, point = NULL, interactive = TRUE,
   crosshairs = TRUE, orientationLabels = TRUE, fixedWindow = TRUE,
@@ -25,6 +28,10 @@ be of any mode, and will be character mode when \code{indexNames} is not
 \code{NULL}.}
 
 \item{imageNames}{A character vector giving a name for each image displayed.}
+
+\item{directions}{A matrix of 3D acquisition direction vectors, one per row.}
+
+\item{bValues}{A vector of b-values, if the image is diffusion-weighted.}
 
 \item{images}{An \code{MriImage} object, or list of \code{MriImage} objects.}
 
@@ -68,9 +75,6 @@ The \code{defaultInfoPanel} and \code{timeSeriesPanel} functions are
   not intended to be called directly. They are simple examples of valid
   values for the \code{infoPanel} argument to \code{viewImages}.
 }
-\author{
-Jon Clayden
-}
 \references{
 Please cite the following reference when using TractoR in your
 work:
@@ -83,4 +87,6 @@ Journal of Statistical Software 44(8):1-18.
 \seealso{
 \code{\link{getColourScale}}
 }
-
+\author{
+Jon Clayden
+}
