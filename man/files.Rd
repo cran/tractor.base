@@ -11,7 +11,8 @@
 \alias{registerPathHandler}
 \title{Working with MRI images stored in NIfTI, Analyze and MGH formats}
 \usage{
-identifyImageFileNames(fileName, fileType = NULL, errorIfMissing = TRUE)
+identifyImageFileNames(fileName, fileType = NULL, errorIfMissing = TRUE,
+  ...)
 
 imageFileExists(fileName, fileType = NULL)
 
@@ -22,10 +23,10 @@ symlinkImageFiles(from, to, overwrite = FALSE, relative = TRUE)
 copyImageFiles(from, to, overwrite = FALSE, deleteOriginals = FALSE)
 
 readImageFile(fileName, fileType = NULL, metadataOnly = FALSE,
-  volumes = NULL, sparse = FALSE, mask = NULL, reorder = TRUE)
+  volumes = NULL, sparse = FALSE, mask = NULL, reorder = TRUE, ...)
 
 writeImageFile(image, fileName = NULL, fileType = NA, overwrite = TRUE,
-  maxSize = NULL)
+  maxSize = NULL, writeTags = FALSE)
 
 registerPathHandler(regex, handler)
 }
@@ -39,6 +40,8 @@ Details.}
 
 \item{errorIfMissing}{Logical value: raise an error if no suitable files
 were found?}
+
+\item{\dots}{Additional arguments to custom path handlers.}
 
 \item{overwrite}{Logical value: overwrite an existing image file? For
 \code{writeImageFile}, an error will be raised if there is an existing
@@ -75,6 +78,9 @@ This is recommended in most circumstances.}
 use when storing the data. This can lead to a substantial loss of
 precision, and is usually not desirable. Only used when writing to the
 NIfTI file format.}
+
+\item{writeTags}{Logical value: should tags be written in YAML format to an
+auxiliary file?}
 
 \item{regex}{A regular expression.}
 

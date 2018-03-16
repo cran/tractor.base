@@ -240,12 +240,7 @@ MriImage <- setRefClass("MriImage", contains="SerialisableObject", fields=list(i
     getTags = function (keys = NULL)
     {
         "Retrieve some or all of the tags stored with the image"
-        if (is.null(keys))
-            return (tags)
-        else if (length(keys) == 1)
-            return (tags[[keys]])
-        else
-            return (tags[keys])
+        indexList(tags, keys)
     },
     
     getVoxelDimensions = function () { return (voxelDims) },
@@ -277,6 +272,8 @@ MriImage <- setRefClass("MriImage", contains="SerialisableObject", fields=list(i
         else
             return (emptyMatrix())
     },
+    
+    hasTags = function (keys) { return (sapply(keys, function(key) !is.null(tags[[key]]))) },
     
     isEmpty = function () { return (is.null(data)) },
     
@@ -315,7 +312,11 @@ MriImage <- setRefClass("MriImage", contains="SerialisableObject", fields=list(i
         .self$map(function(x,y) ifelse(y==0,0,x), maskImage)
     },
     
+    nSlices = function () { return (ifelse(length(imageDims) > 2, imageDims[3], 1L)) },
+    
     nTags = function () { return (length(tags)) },
+    
+    nVolumes = function () { return (ifelse(length(imageDims) > 3, prod(imageDims[-(1:3)]), 1L)) },
     
     setOrigin = function (newOrigin)
     {
@@ -498,6 +499,13 @@ setMethod("[", signature(x="MriImage",i="ANY",j="ANY"), function (x, i, j, ..., 
 
 #' @rdname index
 #' @export
+setMethod("[", signature(x="MriImage",i="MriImage",j="missing"), function (x, i, j, ..., drop = TRUE) {
+    .warnIfIndexingUnreorderedImage(x)
+    return (x[i$getNonzeroIndices(array=TRUE,...), drop=drop])
+})
+
+#' @rdname index
+#' @export
 setReplaceMethod("[", signature(x="MriImage",i="missing",j="missing"), function (x, i, j, ..., value) {
     .warnIfIndexingUnreorderedImage(x)
     nArgs <- nargs() - 1
@@ -558,6 +566,15 @@ setReplaceMethod("[", signature(x="MriImage",i="ANY",j="ANY"), function (x, i, j
     }
     else
         x$data[i,j,...] <- value
+    x$setSource(NULL)
+    return (x)
+})
+
+#' @rdname index
+#' @export
+setReplaceMethod("[", signature(x="MriImage",i="MriImage",j="missing"), function (x, i, j, ..., value) {
+    .warnIfIndexingUnreorderedImage(x)
+    x$data[i$getNonzeroIndices(array=TRUE,...)] <- value
     x$setSource(NULL)
     return (x)
 })
@@ -840,5 +857,20 @@ mergeMriImages <- function (...)
     data <- do.call("c", lapply(images, as.array))
     dim(data) <- c(blockDims, length(data) %/% prod(blockDims))
     
-    return (asMriImage(data, images[[which.max(imageSizes)]]))
+    tags <- Reduce(function(x,y) {
+        sapply(intersect(names(x$getTags()),names(y$getTags())), function(n) {
+            tx <- x$getTags(n)
+            ty <- y$getTags(n)
+            if (equivalent(tx, ty))
+                tx
+            else if (length(dim(data)) == 3 && length(tx) == x$nSlices() && length(ty) == y$nSlices())
+                c(tx, ty)
+            else if (length(dim(data)) == 4 && length(tx) == x$nVolumes() && length(ty) == y$nVolumes())
+                c(tx, ty)
+            else
+                NULL
+        }, simplify=FALSE, USE.NAMES=TRUE)
+    }, images)
+    
+    return (asMriImage(data, images[[which.max(imageSizes)]], tags=tags[!sapply(tags,is.null)]))
 }

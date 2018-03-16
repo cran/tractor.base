@@ -25,7 +25,7 @@ getParametersForFileType <- function (fileType = NA, format = NA, singleFile = N
 
 #' @rdname files
 #' @export
-identifyImageFileNames <- function (fileName, fileType = NULL, errorIfMissing = TRUE)
+identifyImageFileNames <- function (fileName, fileType = NULL, errorIfMissing = TRUE, ...)
 {
     suffixes <- union(.FileTypes$headerSuffixes, .FileTypes$imageSuffixes)
     fileName <- expandFileName(fileName)
@@ -40,11 +40,11 @@ identifyImageFileNames <- function (fileName, fileType = NULL, errorIfMissing = 
         {
             if (fileName %~% names(.Workspace$pathHandlers)[i])
             {
-                fileName <- .Workspace$pathHandlers[[i]](fileName)
+                fileName <- .Workspace$pathHandlers[[i]](fileName, ...)
                 if (is.null(fileName))
                     report(OL$Error, "Custom path handler could not resolve file name: #{fileName}")
                 else
-                    return(identifyImageFileNames(fileName, fileType=fileType, errorIfMissing=errorIfMissing))
+                    return (identifyImageFileNames(fileName, fileType=fileType, errorIfMissing=errorIfMissing))
             }
         }
         
@@ -273,6 +273,7 @@ chooseDataTypeForImage <- function (image, format)
 #'   image is of interest. Ignored if \code{sparse} is not \code{TRUE}.
 #' @param reorder Logical value: should the image data be reordered to LAS?
 #'   This is recommended in most circumstances.
+#' @param \dots Additional arguments to custom path handlers.
 #' @param overwrite Logical value: overwrite an existing image file? For
 #'   \code{writeImageFile}, an error will be raised if there is an existing
 #'   file and this is set to FALSE.
@@ -280,6 +281,8 @@ chooseDataTypeForImage <- function (image, format)
 #'   use when storing the data. This can lead to a substantial loss of
 #'   precision, and is usually not desirable. Only used when writing to the
 #'   NIfTI file format.
+#' @param writeTags Logical value: should tags be written in YAML format to an
+#'   auxiliary file?
 #' @param errorIfMissing Logical value: raise an error if no suitable files
 #'   were found?
 #' @param deleteOriginals Logical value: if \code{TRUE}, \code{copyImageFiles}
@@ -318,9 +321,9 @@ chooseDataTypeForImage <- function (image, format)
 #' \url{http://www.jstatsoft.org/v44/i08/}.
 #' @rdname files
 #' @export
-readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volumes = NULL, sparse = FALSE, mask = NULL, reorder = TRUE)
+readImageFile <- function (fileName, fileType = NULL, metadataOnly = FALSE, volumes = NULL, sparse = FALSE, mask = NULL, reorder = TRUE, ...)
 {
-    fileNames <- identifyImageFileNames(fileName, fileType)
+    fileNames <- identifyImageFileNames(fileName, fileType, ...)
     
     readFun <- switch(fileNames$format, Analyze=readAnalyze, Nifti=readNifti, Mgh=readMgh)
     info <- readFun(fileNames)
@@ -488,10 +491,11 @@ writeImageData <- function (image, connection, type, size, endian = .Platform$en
         report(OL$Error, "The specified image is not an MriImage object")
     
     data <- image$getData()
+    dims <- image$getDimensions()
     
-    if (image$isSparse())
+    # writeBin() can only write 2^31 - 1 bytes, so work blockwise if necessary
+    if (image$isSparse() || prod(dims) * size >= 2^31)
     {
-        dims <- image$getDimensions()
         nDims <- image$getDimensionality()
         for (i in seq_len(dims[nDims]))
         {
@@ -514,7 +518,7 @@ writeImageData <- function (image, connection, type, size, endian = .Platform$en
 
 #' @rdname files
 #' @export
-writeImageFile <- function (image, fileName = NULL, fileType = NA, overwrite = TRUE, maxSize = NULL)
+writeImageFile <- function (image, fileName = NULL, fileType = NA, overwrite = TRUE, maxSize = NULL, writeTags = FALSE)
 {
     if (!is(image, "MriImage"))
         report(OL$Error, "The specified image is not an MriImage object")
@@ -554,6 +558,9 @@ writeImageFile <- function (image, fileName = NULL, fileType = NA, overwrite = T
         writeNifti(image, fileNames, gzipped=params$gzipped, maxSize=maxSize)
     else if (params$format == "Mgh")
         writeMgh(image, fileNames, gzipped=params$gzipped)
+    
+    if (writeTags && image$nTags() > 0)
+        writeLines(yaml::as.yaml(image$getTags()), ensureFileSuffix(fileStem,"tags"))
     
     invisible (fileNames)
 }
