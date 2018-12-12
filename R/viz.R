@@ -74,8 +74,7 @@ colourMap <- function (image, scale, zlim = NULL)
 {
     if (!is.matrix(image))
         image <- as.matrix(image)
-    if (!is.numeric(image))
-        report(OL$Error, "Image to display should be a 2D numeric matrix")
+    assert(is.numeric(image), "Image to display should be a 2D numeric matrix")
     
     scale <- getColourScale(scale)
     nColours <- length(scale$colours)
@@ -100,12 +99,9 @@ colourMap <- function (image, scale, zlim = NULL)
 
 maximumIntensityProjection <- function (image, axis)
 {
-    if (!is(image, "MriImage"))
-        report(OL$Error, "The specified image is not an MriImage object")
-    
+    image <- as(image, "MriImage")
     nDims <- image$getDimensionality()
-    if (!(axis %in% 1:nDims))
-        report(OL$Error, "Specified axis is not relevant for this image")
+    assert(axis %in% 1:nDims, "Specified axis is not relevant for this image")
     
     planeAxes <- setdiff(1:nDims, axis)
     
@@ -176,9 +172,7 @@ maximumIntensityProjection <- function (image, axis)
 #' @export
 createSliceGraphic <- function (image, x = NA, y = NA, z = NA, device = c("internal","png"), colourScale = 1, add = FALSE, file = NULL, zoomFactor = 1, windowLimits = NULL)
 {
-    if (!is(image, "MriImage"))
-        report(OL$Error, "The specified image is not an MriImage object")
-    
+    image <- as(image, "MriImage")
     device <- match.arg(device)
     
     if (image$getDimensionality() == 2)
@@ -217,9 +211,7 @@ createSliceGraphic <- function (image, x = NA, y = NA, z = NA, device = c("inter
 #' @export
 createProjectionGraphic <- function (image, axis, device = c("internal","png"), colourScale = 1, add = FALSE, file = NULL, zoomFactor = 1, windowLimits = NULL)
 {
-    if (!is(image, "MriImage"))
-        report(OL$Error, "The specified image is not an MriImage object")
-    
+    image <- as(image, "MriImage")
     device <- match.arg(device)
     projection <- maximumIntensityProjection(image, axis)
     imageAxes <- !(1:3 %in% axis)
@@ -238,8 +230,7 @@ createProjectionGraphic <- function (image, axis, device = c("internal","png"), 
 #' @export
 createContactSheetGraphic <- function (image, axis, device = c("internal","png"), colourScale = 1, add = FALSE, file = NULL, zoomFactor = 1, windowLimits = NULL, clearance = NULL, nColumns = NULL)
 {
-    if (!is(image, "MriImage"))
-        report(OL$Error, "The specified image is not an MriImage object")
+    image <- as(image, "MriImage")
     if (image$getDimensionality() != 3)
         report(OL$Error, "The \"createContactSheetGraphic\" function only handles 3D images")
     
@@ -316,6 +307,8 @@ compositeImages <- function (images, x = NULL, y = NULL, z = NULL, colourScales 
     alphaImages <- lapply(seq_along(images), function(i) {
         if (i == 1)
             NULL
+        else if (is(alpha, "MriImage"))
+            return (alpha)
         else if (is.numeric(alpha))
             images[[i]]$copy()$map(function(x) ifelse(!is.na(x) & x>0, alpha, 0))
         else
@@ -337,7 +330,10 @@ compositeImages <- function (images, x = NULL, y = NULL, z = NULL, colourScales 
     
     # Use projections, unless multiple slices on the same axis were requested
     if (is.null(projectOverlays))
+    {
         projectOverlays <- !any(duplicated(info$axis))
+        report(OL$Info, "Overlays will use a maximum-intensity projection")
+    }
     
     if (!separate)
     {

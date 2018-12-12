@@ -30,7 +30,7 @@ DicomMetadata <- setRefClass("DicomMetadata", contains="SerialisableObject", fie
             return (NA)
         
         values <- groups[,ncol(groups),]
-        if (all(values %~% ore(number)))
+        if (all(values %~% ore("^",number,"$")))
             values <- as.numeric(values)
         names(values) <- groups[,ncol(groups)-1,]
         return (values)
@@ -157,9 +157,8 @@ getDescriptionForDicomTag <- function (groupRequired, elementRequired)
 readDicomFile <- function (fileName, checkFormat = TRUE, stopTag = NULL, ignoreTransferSyntax = FALSE, ascii = TRUE)
 {
     fileName <- expandFileName(fileName)
-    
     if (!file.exists(fileName))
-        report(OL$Error, "DICOM file ", fileName, " not found")
+        return (NULL)
     
     # DICOM is sufficiently complicated that this can really only be interpreted to mean "probably" or "probably not"
     isDicomFile <- !checkFormat
