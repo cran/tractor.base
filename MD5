@@ -1,14 +1,14 @@
-2879324b4e3ee8083788204fc607c7a1 *DESCRIPTION
+a82bf0fccc2aa70ce19aac4895d292d4 *DESCRIPTION
 5cdcf2ca9607df24d1c36397acad4793 *NAMESPACE
 42e5681a3903491353e018ad4902f3d6 *R/00_constants.R
 deddb57001af5e0ed05d5251e1db3b3d *R/05_serialise.R
 4bebdb54513b204cc81e24020afc7274 *R/08_sparse.R
 444d7856f377d6ef3a52867d0f917815 *R/10_mri_image.R
 11eae71cec5f191f75b76ddf4fd4d352 *R/12_coerce.R
-4cab0fffe13ac47c6c70bc7c360d754c *R/15_dicom.R
+bf92c43eebb3b5758ab21483081719d1 *R/15_dicom.R
 932918abf660a3101d981788a8fb9de8 *R/deprecated.R
 757184afaf5ddbaa71a1948302b99d1f *R/dicom_dir.R
-e22a366606903d43554e270a22905932 *R/files.R
+b125cfcda23e40e8da1eafdecb742836 *R/files.R
 cc9d0404fdabe6a7bea39756937dcc3a *R/internal.R
 c0812f288ea210c60c27ca23935e04a5 *R/json.R
 0a7e9854964477d33463ac69994e9590 *R/lambda.R
@@ -46,7 +46,7 @@ daae6f7f189f01ed87a43355156db8d0 *man/asMriImage.Rd
 dc795725b67e8f2e4e6bf36f89786b1a *man/emptyMatrix.Rd
 760c0a36ab7b0d5b6791dc9b072331d2 *man/equivalent.Rd
 81300871cfa82184725ee00548c8f8c0 *man/execute.Rd
-8eb95c713add4a7a4e7e603810310714 *man/files.Rd
+00923d5709cc741df8c51b2504f1b77b *man/files.Rd
 16a37b8d4a9b06dc9224fa5e2723fa3e *man/implode.Rd
 d40d0b280610217078ff0cdeff045d47 *man/index.Rd
 3011251c80c3a9b598357342ee3b5036 *man/indexList.Rd
