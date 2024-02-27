@@ -1,11 +1,12 @@
-setOldClass(c("niftiImage", "internalImage"))
+setOldClass("niftiImage")
+setOldClass(c("internalImage", "niftiImage"))
+setOldClass(c("divestImage", "internalImage", "niftiImage"))
 
-.convertNiftiImage <- function (from)
-{
+setAs("niftiImage", "MriImage", function (from) {
     # Pick up divest attributes and convert to tags (anonymising by default)
     attribs <- attributes(from)
     anonymise <- attr(from, "anonymise") %||% TRUE
-    attribs <- attribs[!(names(attribs) %~% "^\\.|^(dim|imagedim|pixdim|pixunits|class|reordered|anonymise)$")]
+    attribs <- attribs[!(names(attribs) %~% "^\\.|^(dim|imagedim|pixdim|pixunits|class|reordered|anonymise|channels)$")]
     if (anonymise)
         attribs <- attribs[!(names(attribs) %~% "^patient")]
     
@@ -15,7 +16,11 @@ setOldClass(c("niftiImage", "internalImage"))
         tags <- list()
     
     if (RNifti:::hasData(from))
+    {
+        # Remove niftiImage and internalImage (but not rgbArray) from data object class
         data <- as.array(from)
+        class(data) <- setdiff(class(data), c("niftiImage","internalImage"))
+    }
     else
         data <- NULL
     
@@ -31,11 +36,8 @@ setOldClass(c("niftiImage", "internalImage"))
     
     reordered <- attr(from, "reordered") %||% FALSE
     
-    return (MriImage$new(imageDims=dim(from), pixdim(from), voxelDimUnits=pixunits(from), origin=origin(from), xform=xform(from), reordered=reordered, tags=tags, data=unclass(data)))
-}
-
-setAs("niftiImage", "MriImage", .convertNiftiImage)
-setAs("internalImage", "MriImage", .convertNiftiImage)
+    return (MriImage$new(imageDims=dim(from), pixdim(from), voxelDimUnits=pixunits(from), origin=origin(from), xform=xform(from), reordered=reordered, tags=tags, data=data))
+})
 
 setAs("MriImage", "nifti", function(from) {
     if (is.null(getOption("niftiAuditTrail")))

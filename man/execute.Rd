@@ -7,7 +7,8 @@
 \usage{
 locateExecutable(fileName, errorIfMissing = TRUE)
 
-execute(executable, params = NULL, errorOnFail = TRUE, silent = FALSE, ...)
+execute(executable, params = NULL, errorOnFail = TRUE, silent = FALSE,
+  ...)
 }
 \arguments{
 \item{executable, fileName}{Name of the executable to run.}
@@ -45,8 +46,7 @@ work:
 
 J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-Journal of Statistical Software 44(8):1-18.
-\url{https://www.jstatsoft.org/v44/i08/}.
+Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 }
 \seealso{
 \code{\link{system2}}

@@ -151,8 +151,7 @@ getDescriptionForDicomTag <- function (groupRequired, elementRequired)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 readDicomFile <- function (fileName, checkFormat = TRUE, stopTag = NULL, ignoreTransferSyntax = FALSE, ascii = TRUE)
 {
@@ -314,17 +313,12 @@ readDicomFile <- function (fileName, checkFormat = TRUE, stopTag = NULL, ignoreT
             elements <- c(elements, currentElement)
             types <- c(types, as.character(type))
             
-            # Handle sequences
-            if (type == "SQ")
+            # Handle sequences of indeterminate length (to date only seen in Philips data)
+            if (type == "SQ" && length == -1)
             {
                 if (sequenceLevel == 0)
                     values <- c(values, "(Sequence)")
-                
-                # Indeterminate length (to date only seen in Philips data)
-                if (length == -1)
-                    sequenceLevel <- sequenceLevel + 1
-                else
-                    seek(connection, where=length, origin="current")
+                sequenceLevel <- sequenceLevel + 1
                 next
             }
             

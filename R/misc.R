@@ -19,8 +19,7 @@
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @examples
 #' implode(1:3, ", ")  # "1, 2, 3"
 #' implode(1:3, ", ", " and ")  # "1, 2 and 3"
@@ -107,8 +106,7 @@ implode <- function (strings, sep = "", finalSep = NULL, ranges = FALSE)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 pluralise <- function (singular, x = NULL, n = NULL, plural = NULL)
 {
@@ -138,8 +136,7 @@ pluralise <- function (singular, x = NULL, n = NULL, plural = NULL)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @examples
 #' embrace(c("image.hdr", "image.img"))
 #' 
@@ -198,8 +195,7 @@ embrace <- function (strings)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 printLabelledValues <- function (labels, values, outputLevel = OL$Info, leftJustify = FALSE)
 {
@@ -225,9 +221,15 @@ printLabelledValues <- function (labels, values, outputLevel = OL$Info, leftJust
 #' 
 #' This function returns its arguments, after concatenating them using \code{c}
 #' and then removing elements with duplicate names. The first element with each
-#' name will remain. Unnamed elements are retained.
+#' name will remain, possibly with subsequent elements' content appended to it.
+#' Unnamed elements are retained.
 #' 
 #' @param ... One or more vectors of any mode, usually named.
+#' @param merge If \code{FALSE}, the default, duplicate elements will simply
+#'   be discarded. If \code{TRUE}, additional elements with the same name will
+#'   be appended to the retained one. This does not apply to unnamed elements.
+#'   If this kind of deduplication actually happens, the return value will be a
+#'   list, regardless of the source type.
 #' @return The concatenated and deduplicated vector.
 #' @author Jon Clayden
 #' @references Please cite the following reference when using TractoR in your
@@ -235,14 +237,24 @@ printLabelledValues <- function (labels, values, outputLevel = OL$Info, leftJust
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
-deduplicate <- function (...)
+deduplicate <- function (..., merge = FALSE)
 {
     x <- c(...)
-    if (!is.null(names(x)))
-        x <- x[names(x) == "" | !duplicated(names(x))]
+    n <- names(x)
+    if (!is.null(n))
+    {
+        isDup <- (n != "" & duplicated(n))
+        if (merge && any(isDup))
+        {
+            x <- as.list(x)
+            # For each duplicated name, replace the first matching element with a concatenated vector
+            for (dup in unique(n[isDup]))
+                x[[dup]] <- do.call("c", c(x[names(x) == dup], list(use.names=FALSE)))
+        }
+        x <- x[!isDup]
+    }
     return (x)
 }
 
@@ -266,8 +278,7 @@ deduplicate <- function (...)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 indexList <- function (list, index = NULL)
 {
@@ -320,8 +331,7 @@ indexList <- function (list, index = NULL)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @aliases paths
 #' @rdname paths
 #' @export
@@ -352,10 +362,13 @@ relativePath <- function (path, referencePath)
     mainPieces <- mainPieces[mainPieces != "."]
     refPieces <- ore.split(ore.escape(.Platform$file.sep), expandFileName(referencePath))
     refPieces <- refPieces[refPieces != "."]
+    refIsDir <- isTRUE(file.info(referencePath)$isdir)
     
     shorterLength <- min(length(mainPieces), length(refPieces))
-    firstDifferentPiece <- min(which(mainPieces[1:shorterLength] != refPieces[1:shorterLength])[1], shorterLength, na.rm=TRUE)
-    newPieces <- c(rep("..", length(refPieces)-firstDifferentPiece), mainPieces[firstDifferentPiece:length(mainPieces)])
+    firstDifferentPiece <- min(which(mainPieces[1:shorterLength] != refPieces[1:shorterLength])[1], shorterLength+1, na.rm=TRUE)
+    newPieces <- rep("..", max(0, length(refPieces)-firstDifferentPiece+as.integer(refIsDir)))
+    if (length(mainPieces >= firstDifferentPiece))
+        newPieces <- c(newPieces, mainPieces[firstDifferentPiece:length(mainPieces)])
     
     return (implode(newPieces, sep=.Platform$file.sep))
 }
@@ -391,7 +404,7 @@ expandFileName <- function (fileName, base = getwd())
     # Absolute paths are assumed to start with an optional drive letter and colon (for Windows), and then a slash or backslash
     # This covers C:\dir\file, \dir\file, \\server\dir\file, //server/dir/file and /dir/file, but not URLs
     # Cf. https://docs.microsoft.com/en-gb/windows/win32/fileio/naming-a-file#fully-qualified-vs-relative-paths
-    fileName <- ifelse(fileName %~% "^([A-Za-z]:)?[/\\\\]", fileName, file.path(base,fileName))
+    fileName <- ifelse(fileName %~% "^([A-Za-z]:)?[/\\\\]|^~", fileName, file.path(base,fileName))
     return (normalizePath(fileName, .Platform$file.sep, FALSE))
 }
 
@@ -471,8 +484,7 @@ locateExecutable <- function (fileName, errorIfMissing = TRUE)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 execute <- function (executable, params = NULL, errorOnFail = TRUE, silent = FALSE, ...)
 {
@@ -503,8 +515,7 @@ execute <- function (executable, params = NULL, errorOnFail = TRUE, silent = FAL
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 promote <- function (x, byrow = FALSE)
 {
@@ -537,8 +548,7 @@ promote <- function (x, byrow = FALSE)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @examples
 #' 
 #' equivalent(c(-1,1), c(1,1))  # FALSE
@@ -576,8 +586,7 @@ equivalent <- function (x, y, signMatters = TRUE, ...)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @examples
 #' 
 #' allEqual(c(1,1,1))  # TRUE
@@ -622,8 +631,7 @@ stripNul <- function (x, method = c("truncate","drop"))
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 threadSafeTempFile <- function (pattern = "file")
 {
@@ -631,6 +639,40 @@ threadSafeTempFile <- function (pattern = "file")
     if (!file.exists(tempDir))
         dir.create(tempDir)
     return (tempfile(pattern=pattern, tmpdir=tempDir))
+}
+
+#' Compact conditional values
+#' 
+#' This simple function checks whether its first argument is a logical value
+#' that evaluates to \code{TRUE}. If so, it returns its second argument. If
+#' not, it returns its third argument.
+#' 
+#' This function differs from the standard \code{\link{ifelse}} function in
+#' that it does not act elementwise, and that the third argument is optional,
+#' defaulting to \code{NULL}.
+#' 
+#' @param condition An expression that resolves to a single logical value.
+#' @param value,fallback Any expression.
+#' @return \code{value}, if \code{condition} evaluates to \code{TRUE};
+#'   otherwise \code{fallback}.
+#' @author Jon Clayden
+#' @seealso ifelse
+#' @references Please cite the following reference when using TractoR in your
+#' work:
+#' 
+#' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
+#' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
+#' @export
+where <- function (condition, value, fallback = NULL)
+{
+    conditionString <- deparse(substitute(condition))
+    assert(is.logical(condition) && length(condition) == 1, "Condition \"#{conditionString}\" does not evaluate to a single logical value", level=OL$Warning)
+    
+    if (isTRUE(condition))
+        return (value)
+    else
+        return (fallback)
 }
 
 #' Resolve a variable to a default when NULL
@@ -644,15 +686,17 @@ threadSafeTempFile <- function (pattern = "file")
 #' @param X,Y R objects, possibly \code{NULL}.
 #' @return \code{X}, if it is not \code{NULL}; otherwise \code{Y}.
 #' @author Jon Clayden
+#' @seealso \code{\link{where}}, which resolves a value if an expression is
+#'   \code{TRUE}. Several calls to that function can be conveniently chained
+#'   together with this one.
 #' @references Please cite the following reference when using TractoR in your
 #' work:
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @name infix
-#' @export
+#' @rawNamespace if (getRversion() < "4.4") export("%||%")
 "%||%" <- function (X, Y)
 {
     if (is.null(X)) Y else X

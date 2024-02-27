@@ -16,8 +16,7 @@
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 emptyMatrix <- function ()
 {
@@ -31,7 +30,8 @@ is.emptyMatrix <- function (object)
     return (identical(object, .EmptyMatrix))
 }
 
-setClassUnion("MriImageData", c("SparseArray","array","NULL"))
+setOldClass("rgbArray")
+setClassUnion("MriImageData", c("SparseArray","rgbArray","array","NULL"))
 
 #' The MriImage class
 #' 
@@ -319,6 +319,8 @@ MriImage <- setRefClass("MriImage", contains="SerialisableObject", fields=list(i
     
     isReordered = function () { return (isTRUE(reordered)) },
     
+    isRgb = function () { return (inherits(data,"rgbArray")) },
+    
     isSparse = function () { return (is(data,"SparseArray")) },
     
     map = function (fun, ..., sparse = NULL)
@@ -348,6 +350,8 @@ MriImage <- setRefClass("MriImage", contains="SerialisableObject", fields=list(i
         "Mask the image, setting zero voxels in the mask to zero"
         .self$map(function(x,y) ifelse(y==0,0,x), maskImage)
     },
+    
+    nChannels = function () { return (ifelse(.self$isRgb(), attr(data,"channels") %||% 3L, 1L)) },
     
     nSlices = function () { return (ifelse(length(imageDims) > 2, imageDims[3], 1L)) },
     
@@ -389,10 +393,10 @@ MriImage <- setRefClass("MriImage", contains="SerialisableObject", fields=list(i
         invisible(.self)
     },
     
-    setTags = function (...)
+    setTags = function (..., merge = FALSE)
     {
-        "Add or replace metadata tags"
-        newTags <- deduplicate(list(...), .self$tags)
+        "Add, replace or merge metadata tags"
+        newTags <- deduplicate(list(...), .self$tags, merge=merge)
         .self$tags <- newTags[!sapply(newTags,is.null)]
         invisible(.self)
     },
@@ -684,8 +688,7 @@ setMethod("Summary", "MriImage", Summary.MriImage)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 asMriImage <- function (data, templateImage = nilObject(), imageDims = NA, voxelDims = NA, voxelDimUnits = NA, origin = NA, tags = NA, reordered = NA)
 {
@@ -817,8 +820,7 @@ reorderMriImage <- function (image)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 mergeMriImages <- function (..., bindDim = NULL, padTags = FALSE)
 {

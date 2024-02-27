@@ -1,13 +1,13 @@
-#' The SerialisableObject class
+#' The TractorObject class
 #' 
 #' This reference class extends the standard \code{\linkS4class{envRefClass}}
-#' class, adding a function for simple serialisation of the data fields of an
-#' object, and one for finding all of the methods available for an object. A
-#' serialised object may be deserialised using the
-#' \code{\link{deserialiseReferenceObject}} function.
+#' class, adding methods for finding all of the field or methods available for
+#' an object. There is also a method for summarising key elements of the object
+#' as a named character vector, which can be suitable overridden by inheriting
+#' classes. The \code{show} method prints this summary as a labelled list.
 #' 
 #' @export
-SerialisableObject <- setRefClass("SerialisableObject", methods=list(
+TractorObject <- setRefClass("TractorObject", methods=list(
     fields = function ()
     {
         "Retrieve a list of all field names"
@@ -18,8 +18,40 @@ SerialisableObject <- setRefClass("SerialisableObject", methods=list(
             return (allFieldNames[!(allFieldNames %~% "\\.$")])
     },
     
-    methods = function () { return (.self$getRefClass()$methods()) },
+    methods = function ()
+    {
+        "Retrieve a list of all method names"
+        return (.self$getRefClass()$methods())
+    },
     
+    summarise = function ()
+    {
+        "Summarise key aspects of the object"
+        return (c("Object class"=class(.self)[1]))
+    }
+))
+
+setMethod("show", "TractorObject", function (object)
+{
+    summaryList <- object$summarise()
+    if (is.list(summaryList) && all(c("labels","values") %in% names(summaryList)))
+        printLabelledValues(summaryList$labels, summaryList$values)
+    else if (!is.null(names(summaryList)))
+        printLabelledValues(names(summaryList), as.character(summaryList))
+})
+
+#' The SerialisableObject class
+#' 
+#' This reference class extends \code{\linkS4class{TractorObject}} by adding a
+#' function for simple serialisation of the data fields of an object, either to
+#' a list or a file. This is intended to be used for classes whose state can
+#' meaningfully be restored from a list of standard R objects (not including
+#' transient C/C++ pointers, for example). A serialised object may be
+#' deserialised using the \code{\link{deserialiseReferenceObject}} function.
+#' 
+#' @seealso \code{\link{save}}
+#' @export
+SerialisableObject <- setRefClass("SerialisableObject", contains="TractorObject", methods=list(
     serialise = function (file = NULL)
     {
         "Serialise the object to a list or file"
@@ -52,20 +84,6 @@ SerialisableObject <- setRefClass("SerialisableObject", methods=list(
     }
 ))
 
-setMethod("show", "SerialisableObject", function (object)
-{
-    if ("summarise" %in% object$methods())
-    {
-        summaryList <- object$summarise()
-        if (is.list(summaryList) && all(c("labels","values") %in% names(summaryList)))
-            printLabelledValues(summaryList$labels, summaryList$values)
-        else if (!is.null(names(summaryList)))
-            printLabelledValues(names(summaryList), as.character(summaryList))
-    }
-    else
-        cat(paste("An object of class \"", class(object)[1], "\"\n", sep=""))
-})
-
 .NilObject <- SerialisableObject$new()
 
 #' The nil object
@@ -86,8 +104,7 @@ setMethod("show", "SerialisableObject", function (object)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @export
 nilObject <- function ()
 {
@@ -155,8 +172,7 @@ is.nilObject <- function (object)
 #' 
 #' J.D. Clayden, S. Muñoz Maniega, A.J. Storkey, M.D. King, M.E. Bastin & C.A.
 #' Clark (2011). TractoR: Magnetic resonance imaging and tractography with R.
-#' Journal of Statistical Software 44(8):1-18.
-#' \url{https://www.jstatsoft.org/v44/i08/}.
+#' Journal of Statistical Software 44(8):1-18. \doi{10.18637/jss.v044.i08}.
 #' @aliases serialisation
 #' @rdname serialisation
 #' @export
