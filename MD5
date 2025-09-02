@@ -1,4 +1,4 @@
-1fa1d2bd97d735e1cb468c68e24011ca *DESCRIPTION
+eb2e1f256ff23aa9923408f65ea2fd1a *DESCRIPTION
 8843a06282461601aa3a667a6c8f24c2 *NAMESPACE
 f2722c9eaabf64532f6c3437aaa707bd *R/00_constants.R
 52c73d9bb4b03734b2641dbf25156a64 *R/05_serialise.R
@@ -12,7 +12,7 @@ cc9d0404fdabe6a7bea39756937dcc3a *R/internal.R
 c0812f288ea210c60c27ca23935e04a5 *R/json.R
 6c7e1a32b0caadcca8eb254f785f14df *R/lambda.R
 39b845ffdf0289e114bf85116b056245 *R/mgh.R
-ab644850428c8b45c4276a611fe58a85 *R/misc.R
+5d618479cb8e065eb3a4b25ddf407f42 *R/misc.R
 80529e4db9d7a09d1dad563acefbbc25 *R/mrtrix.R
 946ecd96634085e019fcaf710e26fa3a *R/neighbourhood.R
 2e8e5472b71706e63571c2d9890a8012 *R/nifti.R
@@ -22,7 +22,7 @@ e887b0bdd3b2be0b6bf7467fe8766a3a *R/png.R
 ae16da14cd38f116272b1417f09ae541 *R/viewer.R
 f7e442ddf61b4098a074d98d2e1d2dff *R/viz.R
 5237633cc6632b02daea2c42179cfb6f *R/zzz.R
-8faf250d78a120ba4c7ea2186efddd24 *build/partial.rdb
+1bf18d9c216b8d95033f0bd2fe2906b2 *build/partial.rdb
 4cef960fe0c85b01c6dcb1bac04db4b5 *inst/CITATION
 d3a8df59954ee654bef87dec39cd922e *inst/extdata/analyze/maskedb0.hdr.gz
 c5fc2a635d932db7631e1309536f8b85 *inst/extdata/analyze/maskedb0.img.gz
@@ -71,7 +71,7 @@ b44ea084ba4557604e34a0e01e1069dd *man/mergeMriImages.Rd
 9d605d05e2ca98a5c8720dd376b272a4 *man/nilObject.Rd
 7b6243dac53c8dcf7715f941672a8d49 *man/paths.Rd
 1415824ab3a6b2e1afde52009344da6c *man/pluralise.Rd
-2f73b8e44e505cf090b53dfb8bde3ec3 *man/printLabelledValues.Rd
+42edd0d0bf9d7d8f44bede4e8e353364 *man/printLabelledValues.Rd
 f32ac1b5472551f705a6c9fff70ba885 *man/promote.Rd
 38db80bf347c20b2779e324c17c00704 *man/readDicomDirectory.Rd
 4c4ab315323cc6450d839592ae19d253 *man/readDicomFile.Rd
