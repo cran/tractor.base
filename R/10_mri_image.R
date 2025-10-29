@@ -451,7 +451,7 @@ MriImage <- setRefClass("MriImage", contains="SerialisableObject", fields=list(i
 ))
 
 # Register deserialiser for MriImageMetadata legacy class
-registerDeserialiser("MriImageMetadata", function (fields) {
+registerDeserialiser("MriImageMetadata", function (fields, ...) {
     object <- MriImage$new(imageDims=fields$imagedims, voxelDims=fields$voxdims, voxelDimUnits=fields$voxunit, source=fields$source, origin=fields$origin, xform=fields$storedXform, tags=fields$tags, data=NULL)
     return (object)
 })
@@ -829,7 +829,7 @@ mergeMriImages <- function (..., bindDim = NULL, padTags = FALSE)
         return (images[[1]])
     if (!allEqual(sapply(images, orientation)))
         images <- lapply(images, reorderMriImage)
-    if (!allEqual(lapply(images, xform), tolerance=1e-4))
+    if (!allEqual(lapply(images, xform), tolerance=1e-4, check.attributes=FALSE))
         report(OL$Warning, "Merging images with nonequal xforms - this is probably unwise")
     
     dimensionalities <- sapply(images, function(x) x$getDimensionality())
